@@ -1,0 +1,119 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - App Gestión Stock</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .dashboard-container {
+            min-height: 100vh;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .header {
+            background: #fff;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .welcome-text {
+            color: #333;
+            font-size: 18px;
+            font-weight: 500;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .user-name {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .logout-btn {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+
+        .logout-btn:hover {
+            background-color: #c82333;
+        }
+
+        .logout-btn:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .main-content {
+            background: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .main-content h2 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .main-content p {
+            color: #666;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-size: 18px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading inicial -->
+    <div id="loading" class="loading">
+        Verificando autenticación...
+    </div>
+
+    <!-- Contenido principal (oculto inicialmente) -->
+    <div id="dashboard" class="dashboard-container" style="display: none;">
+        <div class="header">
+            <div class="welcome-text">App Gestión de Stock</div>
+            <div class="user-info">
+                <span class="user-name">Bienvenido, <span id="username">Usuario</span></span>
+                <button id="logoutBtn" class="logout-btn">Cerrar Sesión</button>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <h2>Dashboard Principal</h2>
+            <p>¡Bienvenido al sistema de gestión de stock!</p>
+            <p>Aquí se desarrollará el resto de la aplicación.</p>
+        </div>
+    </div>
+
+    <script src="control.js"></script>
+</body>
+</html>
