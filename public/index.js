@@ -50,6 +50,8 @@ document.addEventListener('DOMContentLoaded', () => {
         
       } else {
         showMessage(result.message || 'Error en el login', 'error');
+        console.log('Login failed, status:', response.status, 'message:', result.message);
+        form.reset();
       }
     } catch (error) {
       console.error('Error:', error);
