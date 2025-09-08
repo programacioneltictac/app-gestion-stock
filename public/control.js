@@ -54,10 +54,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Ocultar loading y mostrar dashboard
     loadingDiv.style.display = 'none';
     dashboardDiv.style.display = 'block';
-    
+
     // Mostrar nombre del usuario
     usernameSpan.textContent = user.username;
-    
+
+    // Lógica de roles para sucursales
+    const branchesNavBtn = document.getElementById('branchesNavBtn');
+    const branchesSubmenu = document.getElementById('branchesSubmenu');
+
+    if (branchesNavBtn && branchesSubmenu) {
+      if (user.role === 'admin' || user.role === 'manager') {
+        // Mostrar todas las sucursales
+        branchesNavBtn.style.display = 'block';
+        branchesSubmenu.innerHTML = `
+          <button>Casa Central</button>
+          <button>Boutique</button>
+          <button>Alvear</button>
+          <button>Castex</button>
+          <button>Luiggi</button>
+          <button>Impulso</button>
+          <button>Ingaramo</button>
+          <button>Santa Lucia</button>
+        `;
+      } else if (user.role === 'employee') {
+        // Mostrar solo la sucursal asignada
+        branchesNavBtn.style.display = 'block';
+        branchesSubmenu.innerHTML = `
+          <button>${user.branch_name || 'Sucursal asignada'}</button>
+        `;
+      } else {
+        // Ocultar menú si el rol no corresponde
+        branchesNavBtn.style.display = 'none';
+        branchesSubmenu.style.display = 'none';
+      }
+    }
+
     console.log('Usuario autenticado:', user);
   }
 
