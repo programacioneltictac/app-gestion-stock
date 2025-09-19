@@ -13,6 +13,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Event listener para logout
   logoutBtn.addEventListener('click', handleLogout);
 
+  // Event listener para cerrar menús al hacer click fuera
+  document.addEventListener('click', (e) => {
+    const branchesSubmenu = document.getElementById('branchesSubmenu');
+    const stockSubmenu = document.getElementById('stockSubmenu');
+    const branchesBtn = document.getElementById('branchesNavBtn');
+    const stockBtn = document.getElementById('stockNavBtn');
+
+    // Si el click no es en los botones o submenús, cerrar todos los menús
+    if (!branchesBtn.contains(e.target) && !branchesSubmenu.contains(e.target)) {
+      branchesSubmenu.classList.remove('show');
+    }
+    if (!stockBtn.contains(e.target) && !stockSubmenu.contains(e.target)) {
+      stockSubmenu.classList.remove('show');
+    }
+  });
+
   async function verifyAuthentication() {
     try {
       const token = localStorage.getItem('authToken');
@@ -53,43 +69,113 @@ document.addEventListener('DOMContentLoaded', async () => {
   function showDashboard(user) {
     // Ocultar loading y mostrar dashboard
     loadingDiv.style.display = 'none';
-    dashboardDiv.style.display = 'block';
+    dashboardDiv.style.display = 'flex';
 
     // Mostrar nombre del usuario
     usernameSpan.textContent = user.username;
 
-    // Lógica de roles para sucursales
+    // Guardar usuario globalmente para los menús
+    window.currentUser = user;
+
+    // Configurar menús según rol
+    populateBranchesMenu(user);  // ← CAMBIAR setupBranchesMenu por populateBranchesMenu
+    populateStockMenu(user);     // ← CAMBIAR setupStockMenu por populateStockMenu
+
+    console.log('Usuario autenticado:', user);
+  }
+
+  function populateBranchesMenu(user) {
     const branchesNavBtn = document.getElementById('branchesNavBtn');
     const branchesSubmenu = document.getElementById('branchesSubmenu');
 
     if (branchesNavBtn && branchesSubmenu) {
       if (user.role === 'admin' || user.role === 'manager') {
-        // Mostrar todas las sucursales
+        // Mostrar todas las sucursales para resumen
         branchesNavBtn.style.display = 'block';
         branchesSubmenu.innerHTML = `
-          <button>Casa Central</button>
-          <button>Boutique</button>
-          <button>Alvear</button>
-          <button>Castex</button>
-          <button>Luiggi</button>
-          <button>Impulso</button>
-          <button>Ingaramo</button>
-          <button>Santa Lucia</button>
+          <button onclick="goToBranchSummary(1)">Casa Central</button>
+          <button onclick="goToBranchSummary(2)">Boutique</button>
+          <button onclick="goToBranchSummary(3)">Alvear</button>
+          <button onclick="goToBranchSummary(4)">Castex</button>
+          <button onclick="goToBranchSummary(5)">Luiggi</button>
+          <button onclick="goToBranchSummary(6)">Impulso</button>
+          <button onclick="goToBranchSummary(7)">Ingaramo</button>
+          <button onclick="goToBranchSummary(8)">Santa Lucia</button>
         `;
       } else if (user.role === 'employee') {
         // Mostrar solo la sucursal asignada
         branchesNavBtn.style.display = 'block';
         branchesSubmenu.innerHTML = `
-          <button>${user.branch_name || 'Sucursal asignada'}</button>
+          <button onclick="goToBranchSummary(${user.branch_id})">${user.branch_name || 'Sucursal asignada'}</button>
         `;
       } else {
         // Ocultar menú si el rol no corresponde
         branchesNavBtn.style.display = 'none';
-        branchesSubmenu.style.display = 'none';
       }
     }
+  }
 
-    console.log('Usuario autenticado:', user);
+  function populateStockMenu(user) {
+    const stockNavBtn = document.getElementById('stockNavBtn');
+    const stockSubmenu = document.getElementById('stockSubmenu');
+
+    if (stockNavBtn && stockSubmenu) {
+      if (user.role === 'admin' || user.role === 'manager') {
+        // Admin y Manager pueden ver todas las sucursales
+        stockNavBtn.style.display = 'block';
+        stockSubmenu.innerHTML = `
+          <button onclick="goToStock(1)">Casa Central</button>
+          <button onclick="goToStock(2)">Boutique</button>
+          <button onclick="goToStock(3)">Alvear</button>
+          <button onclick="goToStock(4)">Castex</button>
+          <button onclick="goToStock(5)">Luiggi</button>
+          <button onclick="goToStock(6)">Impulso</button>
+          <button onclick="goToStock(7)">Ingaramo</button>
+          <button onclick="goToStock(8)">Santa Lucia</button>
+        `;
+      } else if (user.role === 'employee') {
+        // Employee solo ve su sucursal
+        stockNavBtn.style.display = 'block';
+        stockSubmenu.innerHTML = `
+          <button onclick="goToStock(${user.branch_id})">${user.branch_name || 'Mi Sucursal'}</button>
+        `;
+      } else {
+        // Ocultar menú si el rol no corresponde
+        stockNavBtn.style.display = 'none';
+      }
+    }
+  }
+
+  // Función para ir a una sucursal específica (para futuras funcionalidades)
+  function goToBranch(branchId) {
+    console.log('Navegando a sucursal:', branchId);
+    // Aquí se puede implementar navegación específica por sucursal
+    showMessage(`Navegando a ${getBranchName(branchId)}`, 'info');
+  }
+
+  // Función para navegar al sistema de stock
+  function goToStock(branchId) {
+    window.location.href = `/stock.html?branch=${branchId}`;
+  }
+
+  // Función para navegar al resumen de sucursal específica
+  function goToBranchSummary(branchId) {
+    window.location.href = `/branches-summary.html?branch=${branchId}`;
+  }
+
+  // Función para obtener nombre de sucursal
+  function getBranchName(branchId) {
+    const branches = {
+      1: 'Casa Central',
+      2: 'Boutique',
+      3: 'Alvear', 
+      4: 'Castex',
+      5: 'Luiggi',
+      6: 'Impulso',
+      7: 'Ingaramo',
+      8: 'Santa Lucia'
+    };
+    return branches[branchId] || 'Sucursal';
   }
 
   async function handleLogout() {
@@ -152,6 +238,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.body.appendChild(messageDiv);
   }
 
+  function showMessage(message, type = 'info') {
+    const messageDiv = document.createElement('div');
+    messageDiv.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 15px 20px;
+      border-radius: 4px;
+      font-weight: 500;
+      z-index: 1000;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      ${type === 'info' ? 
+        'background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb;' :
+        type === 'success' ?
+        'background: #d4edda; color: #155724; border: 1px solid #c3e6cb;' :
+        'background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;'
+      }
+    `;
+    messageDiv.textContent = message;
+    document.body.appendChild(messageDiv);
+    
+    setTimeout(() => {
+      messageDiv.remove();
+    }, 3000);
+  }
+
   // Función para manejar la navegación del navegador
   window.addEventListener('beforeunload', () => {
     // Aquí se podría implementar lógica adicional antes de cerrar la pestaña
@@ -176,4 +288,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       console.error('Error verificando token periódicamente:', error);
     }
   }, 5 * 60 * 1000); // Verificar cada 5 minutos
+
+  // Hacer funciones globales
+  window.goToBranch = goToBranch;
+  window.goToStock = goToStock;
+  window.goToBranchSummary = goToBranchSummary;        // ← AGREGAR
+  window.populateBranchesMenu = populateBranchesMenu;  // ← AGREGAR
+  window.populateStockMenu = populateStockMenu;        // ← AGREGAR
 });

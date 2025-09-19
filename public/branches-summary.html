@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resumen por Sucursales - Sistema de Stock</title>
+    <link rel="stylesheet" href="control-style.css">
+    <link rel="stylesheet" href="stock-style.css">
+</head>
+<body>
+    <!-- Loading inicial -->
+    <div id="loading" class="loading">
+        Cargando resumen de sucursales...
+    </div>
+
+    <!-- Contenido principal -->
+    <div id="branchesApp" class="dashboard-container" hidden>
+        <!-- Side Navigation Menu -->
+        <nav class="side-nav">
+            <div class="nav-title">Menú</div>
+            <ul>
+                <li><a href="/control.html">Dashboard</a></li>
+                <li>
+                    <button id="branchesNavBtn" onclick="toggleBranchesMenu()">Resumen controles ▼</button>
+                    <div id="branchesSubmenu" class="submenu"></div>
+                </li>
+                <li>
+                    <button id="stockNavBtn" onclick="toggleStockMenu()">Control Stock ▼</button>
+                    <div id="stockSubmenu" class="submenu"></div>
+                </li>
+            </ul>
+        </nav>
+
+         <!-- Main Content -->
+        <div class="main-content">
+            <!-- Header -->
+            <div class="header">
+                <div class="welcome-text">Resumen de Controles por Sucursal</div>
+                <div class="user-info">
+                    <span class="user-name">Usuario: <span id="username">Usuario</span></span>
+                    <button id="logoutBtn" class="logout-btn">Cerrar Sesión</button>
+                </div>
+            </div>         
+
+            <!-- Vista: Selector de Sucursales -->
+            <div id="selectorView" class="content-view">
+                <div class="card control-header">
+                    <h3>Seleccionar Sucursal</h3>
+                    <p>Selecciona una sucursal para ver el resumen de sus controles de stock.</p>
+                </div>
+                
+                <div class="branches-grid" id="branchesGrid">
+                    <!-- Se poblará dinámicamente -->
+                </div>
+            </div>
+
+            <!-- Vista: Resumen de Sucursal -->
+            <div id="summaryView" class="content-view" style="display: none;">
+                <!-- Header del Control -->
+                <div class="card control-header">
+                    <div class="control-info">
+                        <h3 id="branchTitle">Sucursal</h3>
+                        <button onclick="showBranchSelector()" class="btn btn-secondary">
+                            ← Ver Todas las Sucursales
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Estadísticas (igual que en stock.html) -->
+                <div class="card stats-section" id="statsSection">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value" id="totalControls">0</div>
+                            <div class="stat-label">Total Controles</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="completedControls">0</div>
+                            <div class="stat-label">Completados</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="draftControls">0</div>
+                            <div class="stat-label">En Borrador</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabla (idéntica a stock.html) -->
+                <div class=" card table-section" id="tableSection">
+                    <div class="table-header">
+                        <h3>Controles de Stock</h3>
+                        <div class="items-count" id="itemsCount">0 controles</div>
+                    </div>
+                    
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Período</th>
+                                    <th>Estado</th>
+                                    <th>Total Items</th>
+                                    <th>Compliance Promedio</th>
+                                    <th>Necesitan Pedido</th>
+                                    <th>Stock Óptimo</th>
+                                    <th>Excedidos</th>
+                                    <th>Fecha Creación</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="controlsTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            
+            
+        </div>
+    </div>
+
+    <script>
+        function toggleBranchesMenu() {
+            const submenu = document.getElementById('branchesSubmenu');
+            const stockSubmenu = document.getElementById('stockSubmenu');
+            stockSubmenu.classList.remove('show');
+            submenu.classList.toggle('show');
+        }
+
+        function toggleStockMenu() {
+            const submenu = document.getElementById('stockSubmenu');
+            const branchesSubmenu = document.getElementById('branchesSubmenu');
+            branchesSubmenu.classList.remove('show');
+            submenu.classList.toggle('show');
+        }
+    </script>
+    <script src="branches-summary.js"></script>
+</body>
+</html>

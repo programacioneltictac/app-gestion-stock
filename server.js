@@ -1,4 +1,3 @@
-
 require('dotenv').config();
 const path = require('path');
 const express = require('express');
@@ -15,8 +14,8 @@ testConnection();
 
 // Configuración de seguridad
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key-change-in-production';
-const SALT_ROUNDS = 12;
-const TOKEN_EXPIRES_IN = '24h';
+const SALT_ROUNDS = Number(process.env.SALT_ROUNDS) || 12;
+const TOKEN_EXPIRES_IN = process.env.TOKEN_EXPIRES_IN || '24h';
 
 // Flag para activar/desactivar nuevo sistema de auth
 const USE_NEW_AUTH = process.env.USE_NEW_AUTH === 'true';
@@ -25,8 +24,8 @@ const USE_NEW_AUTH = process.env.USE_NEW_AUTH === 'true';
 
 // 1. RATE LIMITING - Protección contra ataques de fuerza bruta
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 5, // máximo 5 intentos por IP por ventana de tiempo
+  windowMs: process.env.LOGIN_WINDOW_MS || 15 * 60 * 1000, // 15 minutos
+  max: Number(process.env.LOGIN_MAX_ATTEMPTS) || 5, // máximo 5 intentos por IP por ventana de tiempo
   message: {
     status: 'error',
     message: 'Demasiados intentos de login. Intenta nuevamente en 15 minutos.'
@@ -35,13 +34,12 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
   // Skip successful requests
   skipSuccessfulRequests: true
-  // Removed custom keyGenerator - using default IP-based limiting
 });
 
 // Rate limiting general para APIs
 const apiLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minuto
-  max: 100, // máximo 100 requests por IP por minuto
+  windowMs: process.env.API_WINDOW_MS || 1 * 60 * 1000, // 1 minuto
+  max: Number(process.env.API_MAX_REQUESTS) || 100, // máximo 100 requests por IP por minuto
   message: {
     status: 'error',
     message: 'Demasiadas peticiones. Intenta nuevamente en un minuto.'
@@ -137,9 +135,6 @@ function validateRegisterInput(req, res, next) {
   });
 }
 
-// 4. SANITIZACIÓN DE DATOS SQL (usando parámetros preparados - ya implementado)
-// PostgreSQL ya maneja esto con los parámetros $1, $2, etc.
-
 // ==================== MIDDLEWARE EXISTENTE ====================
 
 app.use(express.json({ limit: '1mb' })); // Limitar tamaño del payload
@@ -194,6 +189,12 @@ function addBranchFilter(req, res, next) {
   }
   next();
 }
+
+// ==================== RUTAS DE STOCK ====================
+
+// Importar y usar las rutas de stock
+const stockRoutes = require('./routes/stock');
+app.use('/api/stock', authenticateToken, stockRoutes);
 
 // ==================== ENDPOINTS CON SEGURIDAD MEJORADA ====================
 
@@ -423,6 +424,7 @@ const server = app.listen(PORT, () => {
   console.log(`   - Input validation and sanitization`);
   console.log(`   - Security headers`);
   console.log(`   - Audit logging`);
+  console.log(`📦 Stock system endpoints available at /api/stock/`);
 });
 
 // Graceful shutdown

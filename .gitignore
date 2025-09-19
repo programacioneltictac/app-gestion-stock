@@ -1,5 +1,6 @@
 .env
 node_modules/
-.xlsx
+*.xlsx
 *.jpeg
 *.txt
+*.pgerd
