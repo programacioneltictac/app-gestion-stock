@@ -1,97 +1,91 @@
 <!DOCTYPE html>
 <html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard - App Gestión Stock</title>
-    <link rel="stylesheet" href="control-style.css">
-</head>
-<body>
+    <link rel="stylesheet" href="control-style.css" />
+  </head>
+  <body>
     <!-- Loading inicial -->
-    <div id="loading" class="loading">
-        Verificando autenticación...
-    </div>
+    <div id="loading" class="loading">Verificando autenticación...</div>
 
     <!-- Contenido principal (oculto inicialmente) -->
     <div id="dashboard" class="dashboard-container" hidden>
-        <!-- Side Navigation Menu -->
-        <nav class="side-nav">
-            <div class="nav-title">Menú</div>
-            <ul>
-                <li>
-                    <a href="#" id="dashboardNavBtn">Dashboard</a>
-                </li>
-                <li>
-                    <button id="branchesNavBtn" onclick="toggleBranchesMenu()">Resumen controles ▼</button>
-                    <div id="branchesSubmenu" class="submenu">
-                        <!-- Se populará dinámicamente según el rol -->
-                    </div>
-                </li>
-                <li>
-                    <button id="stockNavBtn" onclick="toggleStockMenu()">Control Stock ▼</button>
-                    <div id="stockSubmenu" class="submenu">
-                        <!-- Se populará dinámicamente según el rol -->
-                    </div>
-                </li>
-            </ul>
-        </nav>
-
-        <!-- Content Wrapper -->
-        <div class="content-wrapper">
-            <!-- Header -->
-            <div class="header">
-                <div class="welcome-text">App Gestión de Stock</div>
-                <div class="user-info">
-                    <span class="user-name">Bienvenido, <span id="username">Usuario</span></span>
-                    <button id="logoutBtn" class="logout-btn">Cerrar Sesión</button>
-                </div>
+      <!-- Side Navigation Menu -->
+      <nav class="side-nav">
+        <div class="nav-title">Menú</div>
+        <ul>
+          <li>
+            <a href="#" id="dashboardNavBtn"><strong>Dashboard</strong></a>
+          </li>
+          <li>
+            <button id="branchesNavBtn" onclick="toggleBranchesMenu()">
+              Resumen controles ▼
+            </button>
+            <div id="branchesSubmenu" class="submenu">
+              <!-- Se populará dinámicamente según el rol -->
             </div>
-
-            <!-- Main Content -->
-            <div class="main-content-home">
-                <h2>Dashboard Principal</h2>
-                <p>¡Bienvenido al sistema de gestión de stock!</p>
-                <p>Utiliza el menú lateral para navegar por las diferentes funciones del sistema.</p>
-                
-                <div class="functions-section">
-                    <h3>Funciones Disponibles:</h3>
-                    <ul class="functions-list">
-                        <li><strong>Dashboard:</strong> Vista principal del sistema</li>
-                        <li><strong>Sucursales:</strong> Acceso directo a los controles de stock por sucursal</li>
-                        <li><strong>Sistema Stock:</strong> Gestión completa de inventarios mensuales</li>
-                    </ul>
-                </div>
+          </li>
+          <li>
+            <button id="stockNavBtn" onclick="toggleStockMenu()">
+              Control Stock ▼
+            </button>
+            <div id="stockSubmenu" class="submenu">
+              <!-- Se populará dinámicamente según el rol -->
             </div>
+          </li>
+          <li>
+            <button id="ordersNavBtn">Resumen Pedidos ▼</button>
+          </li>
+          <li>
+            <button id="ordersDetailNavBtn">Detalle Pedidos ▼</button>
+          </li>
+        </ul>
+      </nav>
+
+      <!-- Content Wrapper -->
+      <div class="content-wrapper">
+        <!-- Header -->
+        <div class="header">
+          <div class="welcome-text">App Gestión de Stock</div>
+          <div class="user-info">
+            <span class="user-name"
+              >Bienvenido, <span id="username">Usuario</span></span
+            >
+            <button id="logoutBtn" class="logout-btn">Cerrar Sesión</button>
+          </div>
         </div>
+      </div>
     </div>
 
     <script>
-        // Variables globales para manejo de menús
-        let currentUser = null;
+      // Variables globales para manejo de menús
+      let currentUser = null;
 
-        // Funciones para toggle de menús
-        function toggleBranchesMenu() {
-            const submenu = document.getElementById('branchesSubmenu');
-            const stockSubmenu = document.getElementById('stockSubmenu');
-            
-            // Cerrar el otro menú
-            stockSubmenu.classList.remove('show');
-            
-            // Toggle del menú actual
-            submenu.classList.toggle('show');
-        }
+      // Funciones para toggle de menús
+      function toggleBranchesMenu() {
+        const submenu = document.getElementById("branchesSubmenu");
+        const stockSubmenu = document.getElementById("stockSubmenu");
 
-        function toggleStockMenu() {
-            const submenu = document.getElementById('stockSubmenu');
-            const branchesSubmenu = document.getElementById('branchesSubmenu');
-            
-            // Cerrar el otro menú
-            branchesSubmenu.classList.remove('show');
-            
-            // Toggle del menú actual
-            submenu.classList.toggle('show');
-        }
+        // Cerrar el otro menú
+        stockSubmenu.classList.remove("show");
+
+        // Toggle del menú actual
+        submenu.classList.toggle("show");
+      }
+
+      function toggleStockMenu() {
+        const submenu = document.getElementById("stockSubmenu");
+        const branchesSubmenu = document.getElementById("branchesSubmenu");
+
+        // Cerrar el otro menú
+        branchesSubmenu.classList.remove("show");
+
+        // Toggle del menú actual
+        submenu.classList.toggle("show");
+      }
     </script>
     <script src="control.js"></script>
-</body>
+  </body>
 </html>

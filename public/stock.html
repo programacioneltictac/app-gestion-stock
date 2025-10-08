@@ -1,246 +1,272 @@
 <!DOCTYPE html>
 <html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sistema de Stock - App Gestión Stock</title>
-    <link rel="stylesheet" href="stock-style.css">
-    <link rel="stylesheet" href="control-style.css">
-</head>
-<body>
-    <div id="loading" class="loading">
-        Cargando sistema de stock...
-    </div>
+    <link rel="stylesheet" href="stock-style.css" />
+    <link rel="stylesheet" href="control-style.css" />
+  </head>
+  <body>
+    <div id="loading" class="loading">Cargando sistema de stock...</div>
 
     <div id="stockApp" class="stock-container" hidden>
-        <!-- Side Navigation -->
-        <nav class="side-nav">
-            <div class="nav-title">Menú</div>
-            <ul>
-                <li><a href="/control.html">Dashboard</a></li>
-                <li>
-                    <button id="branchesNavBtn" onclick="toggleBranchesMenu()">Resumen controles ▼</button>
-                    <div id="branchesSubmenu" class="submenu"></div>
-                </li>
-                <li>
-                    <button id="stockNavBtn" onclick="toggleStockMenu()">Control Stock ▼</button>
-                    <div id="stockSubmenu" class="submenu"></div>
-                </li>
-            </ul>
-        </nav>
+      <!-- Side Navigation -->
+      <nav class="side-nav">
+        <div class="nav-title">Menú</div>
+        <ul>
+          <li>
+            <a href="/control.html"><strong>Dashboard</strong></a>
+          </li>
+          <li>
+            <button id="branchesNavBtn" onclick="toggleBranchesMenu()">
+              Resumen controles ▼
+            </button>
+            <div id="branchesSubmenu" class="submenu"></div>
+          </li>
+          <li>
+            <button id="stockNavBtn" onclick="toggleStockMenu()">
+              Control Stock ▼
+            </button>
+            <div id="stockSubmenu" class="submenu"></div>
+          </li>
+          <li>
+            <button id="ordersNavBtn">Resumen Pedidos ▼</button>
+          </li>
+          <li>
+            <button id="ordersDetailNavBtn">Detalle Pedidos ▼</button>
+          </li>
+        </ul>
+      </nav>
 
-        <!-- Main Content -->
-        <div class="main-content">
-            <!-- Header Section -->
-            <div class="card header-section">
-                <div class="control-info">
-                    <h2 id="controlTitle">Control de Stock</h2>
-                    <div class="control-meta">
-                        <span id="branchName">Sucursal</span> | 
-                        <span id="controlPeriod">Período</span> | 
-                        <span id="controlStatus">Estado</span>
-                    </div>
-                </div>
-                <div class="user-info">
-                    <span class="user-name">Usuario: <span id="username">Usuario</span></span>
-                    <button id="logoutBtn" class="logout-btn">Cerrar Sesión</button>
-                </div>
+      <!-- Main Content -->
+      <div class="main-content">
+        <!-- Header Section -->
+        <div class="card header-section">
+          <div class="control-info">
+            <h2 id="controlTitle">Control de Stock</h2>
+            <div class="control-meta">
+              <span id="branchName">Sucursal</span> |
+              <span id="controlPeriod">Período</span> |
+              <span id="controlStatus">Estado</span>
             </div>
-            <div class="card header-section">
-                <div class="control-actions">
-                    <button id="createControlBtn" class="btn btn-primary hidden">Crear Control</button>
-                    <button id="saveControlBtn" class="btn btn-secondary hidden">Guardar</button>
-                    <button id="completeControlBtn" class="btn btn-success hidden">Completar</button>
-                </div>
+          </div>
+          <div class="user-info">
+            <span class="user-name"
+              >Usuario: <span id="username">Usuario</span></span
+            >
+            <button id="logoutBtn" class="logout-btn">Cerrar Sesión</button>
+          </div>
+        </div>
+        <div class="card header-section">
+          <div class="control-actions">
+            <button id="createControlBtn" class="btn btn-primary hidden">
+              Crear Control
+            </button>
+            <button id="saveControlBtn" class="btn btn-secondary hidden">
+              Guardar
+            </button>
+            <button id="completeControlBtn" class="btn btn-success hidden">
+              Completar
+            </button>
+          </div>
+        </div>
+
+        <!-- Stats Section -->
+        <div id="statsSection" class="card hidden">
+          <h3>Estadísticas del Control</h3>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-number" id="totalItems">0</div>
+              <div class="stat-label">Total Productos</div>
             </div>
-
-            <!-- Stats Section -->
-            <div id="statsSection" class="card hidden">
-                <h3>Estadísticas del Control</h3>
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-number" id="totalItems">0</div>
-                        <div class="stat-label">Total Productos</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number" id="needOrderItems">0</div>
-                        <div class="stat-label">Generar Pedido</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number" id="optimalItems">0</div>
-                        <div class="stat-label">Stock Óptimo</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number" id="excessItems">0</div>
-                        <div class="stat-label">Excedido</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number" id="avgCompliance">0%</div>
-                        <div class="stat-label">Compliance Promedio</div>
-                    </div>
-                </div>
+            <div class="stat-card">
+              <div class="stat-number" id="needOrderItems">0</div>
+              <div class="stat-label">Generar Pedido</div>
             </div>
+            <div class="stat-card">
+              <div class="stat-number" id="optimalItems">0</div>
+              <div class="stat-label">Stock Óptimo</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-number" id="excessItems">0</div>
+              <div class="stat-label">Excedido</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-number" id="avgCompliance">0%</div>
+              <div class="stat-label">Compliance Promedio</div>
+            </div>
+          </div>
+        </div>
 
-            <!-- Messages -->
-            <div id="messageContainer"></div>
+        <!-- Messages -->
+        <div id="messageContainer"></div>
 
-            <!-- Add Product Form -->
-            <div id="formSection" class="card hidden">
-                <h3>Agregar Producto al Control</h3>
-                <form id="addProductForm" class="form-grid">                    
-                    <div class="form-group">
-                        <label for="productSelect">Producto *</label>
-                        <!--
+        <!-- Add Product Form -->
+        <div id="formSection" class="card hidden">
+          <h3>Agregar Producto al Control</h3>
+          <form id="addProductForm" class="form-grid">
+            <div class="form-group">
+              <label for="productSelect">Producto *</label>
+              <!--
                         <select id="productSelect" required>
                             <option value="">Seleccionar producto...</option>
                         </select>                        
                         -->
-                        <div class="product-input-container">
-                            <input type="text" 
-                                    id="productInput" 
-                                    placeholder="Buscar producto por nombre o código..." 
-                                    required
-                                    autocomplete="off">
-                            <input type="hidden" id="selectedProductId">
-                            <div id="productSuggestions" class="suggestions-list"></div>
-                        </div>
-                        <!-- <input type="text" id="productSelect" placeholder="Buscar producto..." required>    -->
-                    </div>
-                    <div class="form-group">
-                        <label for="categorySelect">Categoría *</label>
-                        <select id="categorySelect" required>
-                            <option value="">Seleccionar...</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="conditionSelect">Condición *</label>
-                        <select id="conditionSelect" required>
-                            <option value="">Seleccionar...</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="productStatusSelect">Estado</label>
-                        <select id="productStatusSelect">
-                            <option value="1">Activo</option>
-                            <option value="2">Inactivo</option>
-                            <option value="3">Prueba</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="stockRequire">Stock Req. *</label>
-                        <input type="number" id="stockRequire" min="0" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="stockCurrent">Stock Actual *</label>
-                        <input type="number" id="stockCurrent" min="0" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="productNotes">Notas</label>
-                        <input type="text" id="productNotes" placeholder="Opcional">
-                    </div>
-                    <div class="form-group">
-                        <button type="submit" class="btn btn-primary">Agregar</button>
-                    </div>                    
-                </form>
+              <div class="product-input-container">
+                <input
+                  type="text"
+                  id="productInput"
+                  placeholder="Buscar producto por nombre o código..."
+                  required
+                  autocomplete="off"
+                />
+                <input type="hidden" id="selectedProductId" />
+                <div id="productSuggestions" class="suggestions-list"></div>
+              </div>
+              <!-- <input type="text" id="productSelect" placeholder="Buscar producto..." required>    -->
             </div>
-
-            <!-- Filters Section -->
-            <div id="filtersSection" class="card hidden">
-                <h3>Filtros</h3>
-                <div class="filters-grid">
-                    <div class="form-group">
-                        <label for="categoryFilter">Categoría</label>
-                        <select id="categoryFilter">
-                            <option value="">Todas las categorías</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="conditionFilter">Condición</label>
-                        <select id="conditionFilter">
-                            <option value="">Todas las condiciones</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="productStatusFilter">Estado Producto</label>
-                            <select id="productStatusFilter">
-                                <option value="">Todos los estados</option>
-                                <option value="1">Activo</option>
-                                <option value="2">Inactivo</option>
-                                <option value="3">Prueba</option>
-                            </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="stockStatusFilter">Estado de Stock</label>
-                        <select id="stockStatusFilter">
-                            <option value="">Todos los estados</option>
-                            <option value="1">Generar Pedido</option>
-                            <option value="2">Stock Óptimo</option>
-                            <option value="3">Excedido</option>
-                            <option value="4">Muy Excedido</option>
-                        </select>
-                    </div>
-                    <div class="form-group search-input">
-                        <label for="searchFilter">Buscar</label>
-                        <input type="text" id="searchFilter" placeholder="Nombre o código del producto">
-                    </div>
-                    <div class="form-group">
-                        <button type="button" class="btn btn-secondary" id="clearFilters">Limpiar Filtros</button>
-                    </div>
-                </div>
+            <div class="form-group">
+              <label for="categorySelect">Categoría *</label>
+              <select id="categorySelect" required>
+                <option value="">Seleccionar...</option>
+              </select>
             </div>
-
-            <!-- Products Table -->
-            <div id="tableSection" class="card hidden">
-                <div class="flex-between">
-                    <h3>Productos en el Control</h3>
-                    <div>
-                        <span id="itemsCount">0 productos</span>
-                    </div>
-                </div>
-                
-                <div class="table-responsive">
-                    <table id="productsTable">
-                        <thead>
-                            <tr>
-                                <th>Producto</th>
-                                <th>Categoría</th>
-                                <th>Condición</th>
-                                <th>Estado Prod.</th>  <!-- ← NUEVA COLUMNA -->
-                                <th>Req.</th>
-                                <th>Actual</th>
-                                <th>Dif.</th>
-                                <th>Compliance</th>
-                                <th>Estado</th>
-                                <th>Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody id="productsTableBody">
-                        </tbody>
-                    </table>
-                </div>
-
-                <!-- Pagination -->
-                <div class="pagination" id="pagination"></div>
+            <div class="form-group">
+              <label for="conditionSelect">Condición *</label>
+              <select id="conditionSelect" required>
+                <option value="">Seleccionar...</option>
+              </select>
             </div>
+            <div class="form-group">
+              <label for="productStatusSelect">Estado</label>
+              <select id="productStatusSelect">
+                <option value="1">Activo</option>
+                <option value="2">Inactivo</option>
+                <option value="3">Prueba</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="stockRequire">Stock Req. *</label>
+              <input type="number" id="stockRequire" min="0" required />
+            </div>
+            <div class="form-group">
+              <label for="stockCurrent">Stock Actual *</label>
+              <input type="number" id="stockCurrent" min="0" required />
+            </div>
+            <div class="form-group">
+              <label for="productNotes">Notas</label>
+              <input type="text" id="productNotes" placeholder="Opcional" />
+            </div>
+            <div class="form-group">
+              <button type="submit" class="btn btn-primary">Agregar</button>
+            </div>
+          </form>
         </div>
+
+        <!-- Filters Section -->
+        <div id="filtersSection" class="card hidden">
+          <h3>Filtros</h3>
+          <div class="filters-grid">
+            <div class="form-group">
+              <label for="categoryFilter">Categoría</label>
+              <select id="categoryFilter">
+                <option value="">Todas las categorías</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="conditionFilter">Condición</label>
+              <select id="conditionFilter">
+                <option value="">Todas las condiciones</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="productStatusFilter">Estado Producto</label>
+              <select id="productStatusFilter">
+                <option value="">Todos los estados</option>
+                <option value="1">Activo</option>
+                <option value="2">Inactivo</option>
+                <option value="3">Prueba</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="stockStatusFilter">Estado de Stock</label>
+              <select id="stockStatusFilter">
+                <option value="">Todos los estados</option>
+                <option value="1">Generar Pedido</option>
+                <option value="2">Stock Óptimo</option>
+                <option value="3">Excedido</option>
+                <option value="4">Muy Excedido</option>
+              </select>
+            </div>
+            <div class="form-group search-input">
+              <label for="searchFilter">Buscar</label>
+              <input
+                type="text"
+                id="searchFilter"
+                placeholder="Nombre o código del producto"
+              />
+            </div>
+            <div class="form-group">
+              <button type="button" class="btn btn-secondary" id="clearFilters">
+                Limpiar Filtros
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Products Table -->
+        <div id="tableSection" class="card hidden">
+          <div class="flex-between">
+            <h3>Productos en el Control</h3>
+            <div>
+              <span id="itemsCount">0 productos</span>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table id="productsTable">
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th>Categoría</th>
+                  <th>Condición</th>
+                  <th>Estado Prod.</th>
+                  <!-- ← NUEVA COLUMNA -->
+                  <th>Req.</th>
+                  <th>Actual</th>
+                  <th>Dif.</th>
+                  <th>Compliance</th>
+                  <th>Estado</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="productsTableBody"></tbody>
+            </table>
+          </div>
+
+          <!-- Pagination -->
+          <div class="pagination" id="pagination"></div>
+        </div>
+      </div>
     </div>
 
     <script>
-        function toggleBranchesMenu() {
-            const submenu = document.getElementById('branchesSubmenu');
-            const stockSubmenu = document.getElementById('stockSubmenu');
-            stockSubmenu.classList.remove('show');
-            submenu.classList.toggle('show');
-        }
+      function toggleBranchesMenu() {
+        const submenu = document.getElementById("branchesSubmenu");
+        const stockSubmenu = document.getElementById("stockSubmenu");
+        stockSubmenu.classList.remove("show");
+        submenu.classList.toggle("show");
+      }
 
-        function toggleStockMenu() {
-            const submenu = document.getElementById('stockSubmenu');
-            const branchesSubmenu = document.getElementById('branchesSubmenu');
-            branchesSubmenu.classList.remove('show');
-            submenu.classList.toggle('show');
-        }
+      function toggleStockMenu() {
+        const submenu = document.getElementById("stockSubmenu");
+        const branchesSubmenu = document.getElementById("branchesSubmenu");
+        branchesSubmenu.classList.remove("show");
+        submenu.classList.toggle("show");
+      }
     </script>
 
     <script src="stock-frontend.js"></script>
-</body>
+  </body>
 </html>

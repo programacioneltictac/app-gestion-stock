@@ -4,3 +4,4 @@ node_modules/
 *.jpeg
 *.txt
 *.pgerd
+*.sql

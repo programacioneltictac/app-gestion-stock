@@ -78,8 +78,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.currentUser = user;
 
     // Configurar menús según rol
-    populateBranchesMenu(user);  // ← CAMBIAR setupBranchesMenu por populateBranchesMenu
-    populateStockMenu(user);     // ← CAMBIAR setupStockMenu por populateStockMenu
+    populateBranchesMenu(user);
+    populateStockMenu(user);
 
     console.log('Usuario autenticado:', user);
   }
