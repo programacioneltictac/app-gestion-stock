@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tree -L 3 -I \"node_modules\")",
+      "Bash(mkdir -p \"C:\\Users\\User\\desktop\\app-gestion-stock\\react-frontend\\src\\shared-theme\")",
+      "Bash(npm install)",
+      "Bash(npm run build)",
+      "Bash(npm run lint)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
