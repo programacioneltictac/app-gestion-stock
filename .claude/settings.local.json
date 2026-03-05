@@ -15,7 +15,8 @@
       "Bash(curl:*)",
       "Bash(__NEW_LINE_df66dec35a21f345__ curl:*)",
       "Bash(__NEW_LINE_cd1adf41a0816adf__ curl:*)",
-      "Bash(PGPASSWORD='Jmg11692152.' psql:*)"
+      "Bash(PGPASSWORD='Jmg11692152.' psql:*)",
+      "Bash(psql:*)"
     ],
     "deny": [],
     "ask": []

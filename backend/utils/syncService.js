@@ -69,8 +69,8 @@ function extractApiFields(apiProduct) {
     externalId:  String(apiProduct.idproducto || ""),
     productName: String(apiProduct.nombreproducto || "").trim(),
     codigos:     String(apiProduct.codigos || "").trim(),
-    stock:       parseInt(unit.stock ?? 0, 10),
-    costPrice:   parseFloat(unit.preciocosto ?? 0),
+    stock:       Math.max(0, parseInt(unit.stock ?? 0, 10)),
+    costPrice:   parseFloat((parseFloat(unit.preciocosto ?? 0) / 1.21).toFixed(2)),
   };
 }
 
@@ -115,9 +115,12 @@ async function syncBranch(branch, groupableBrands) {
   try {
     await client.query("BEGIN");
 
-    // Resetear stock de esta sucursal antes de acumular — evita duplicar en resync
+    // Poner stock=0 y resetear acumuladores de costo antes de acumular.
+    // Se usa UPDATE en lugar de DELETE para preservar los IDs referenciados por stock_controls.
     await client.query(
-      "DELETE FROM product_stock_by_branch WHERE branch_id = $1",
+      `UPDATE product_stock_by_branch
+       SET stock = 0, avg_cost = 0, cost_item_count = 0, last_sync_at = NOW()
+       WHERE branch_id = $1`,
       [branch.id]
     );
 
@@ -164,12 +167,12 @@ async function syncBranch(branch, groupableBrands) {
           groupId = groupCache[cacheKey];
         }
 
-        // --- Upsert del producto ---
+        // --- Upsert del producto (incluye cost_price) ---
         await client.query(
           `INSERT INTO products
              (product_name, product_code, external_id, display_name,
-              group_id, is_grouped, category_id, last_sync_at, is_active)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), true)
+              group_id, is_grouped, category_id, cost_price, last_sync_at, is_active)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), true)
            ON CONFLICT (external_id) WHERE external_id IS NOT NULL DO UPDATE
              SET product_name  = EXCLUDED.product_name,
                  product_code  = EXCLUDED.product_code,
@@ -177,6 +180,7 @@ async function syncBranch(branch, groupableBrands) {
                  group_id      = EXCLUDED.group_id,
                  is_grouped    = EXCLUDED.is_grouped,
                  category_id   = EXCLUDED.category_id,
+                 cost_price    = EXCLUDED.cost_price,
                  last_sync_at  = NOW(),
                  updated_at    = NOW()`,
           [
@@ -187,6 +191,7 @@ async function syncBranch(branch, groupableBrands) {
             groupId,
             groupInfo.isGrouped,
             currentCategoryId,
+            costPrice > 0 ? costPrice : null,
           ]
         );
 
@@ -198,28 +203,61 @@ async function syncBranch(branch, groupableBrands) {
         const productId = productResult.rows[0]?.id;
         if (!productId) continue;
 
-        // --- Upsert del stock por sucursal ---
+        // --- Upsert del stock por sucursal (incluye costos) ---
         if (groupInfo.isGrouped && groupId) {
-          // Para productos agrupados: acumular stock y guardar display_name del grupo
+          // Para grupos: acumular stock y calcular promedio incremental de costo.
+          // Formula: nuevo_avg = (avg_actual * count + costo_nuevo) / (count + 1)
+          // Solo se incluye en el promedio si el producto tiene costo > 0.
           await client.query(
-            `INSERT INTO product_stock_by_branch (branch_id, group_id, stock, display_name, last_sync_at)
-             VALUES ($1, $2, $3, $4, NOW())
+            `INSERT INTO product_stock_by_branch
+               (branch_id, group_id, stock, display_name, avg_cost, cost_item_count, last_sync_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW())
              ON CONFLICT (branch_id, group_id) DO UPDATE
-               SET stock        = product_stock_by_branch.stock + $3,
-                   display_name = EXCLUDED.display_name,
-                   last_sync_at = NOW()`,
-            [branch.id, groupId, stock, groupInfo.displayName]
+               SET stock            = product_stock_by_branch.stock + $3,
+                   display_name     = EXCLUDED.display_name,
+                   avg_cost         = CASE
+                     WHEN $5 IS NOT NULL AND $5 > 0 THEN
+                       ROUND(
+                         (COALESCE(product_stock_by_branch.avg_cost, 0) * product_stock_by_branch.cost_item_count + $5)
+                         / (product_stock_by_branch.cost_item_count + 1)
+                       , 2)
+                     ELSE product_stock_by_branch.avg_cost
+                   END,
+                   cost_item_count  = CASE
+                     WHEN $5 IS NOT NULL AND $5 > 0
+                     THEN product_stock_by_branch.cost_item_count + 1
+                     ELSE product_stock_by_branch.cost_item_count
+                   END,
+                   last_sync_at     = NOW()`,
+            [
+              branch.id,
+              groupId,
+              stock,
+              groupInfo.displayName,
+              costPrice > 0 ? costPrice : null,
+              costPrice > 0 ? 1 : 0,
+            ]
           );
         } else {
-          // Para productos individuales: guardar stock y display_name del producto
+          // Para productos individuales: stock y costo directo
           await client.query(
-            `INSERT INTO product_stock_by_branch (branch_id, product_id, stock, display_name, last_sync_at)
-             VALUES ($1, $2, $3, $4, NOW())
+            `INSERT INTO product_stock_by_branch
+               (branch_id, product_id, stock, display_name, avg_cost, cost_item_count, last_sync_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW())
              ON CONFLICT (branch_id, product_id) DO UPDATE
-               SET stock        = $3,
-                   display_name = EXCLUDED.display_name,
-                   last_sync_at = NOW()`,
-            [branch.id, productId, stock, cleanName]
+               SET stock           = $3,
+                   display_name    = EXCLUDED.display_name,
+                   avg_cost        = EXCLUDED.avg_cost,
+                   cost_item_count = EXCLUDED.cost_item_count,
+                   last_sync_at    = NOW()`,
+            [
+              branch.id,
+              productId,
+              stock,
+              cleanName,
+              costPrice > 0 ? costPrice : null,
+              costPrice > 0 ? 1 : 0,
+            ]
           );
         }
 
@@ -229,6 +267,28 @@ async function syncBranch(branch, groupableBrands) {
         console.error(`Error procesando producto ${raw?.idproducto}:`, err.message);
       }
     }
+
+    // Actualizar stock_current en controles DRAFT de esta sucursal.
+    // Controles completados no se tocan.
+    await client.query(
+      `UPDATE stock_controls
+       SET stock_current   = psb.stock,
+           stock_status_id = CASE
+             WHEN stock_controls.stock_require = 0 THEN 2
+             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) < 50  THEN 1
+             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) <= 100 THEN 2
+             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) <= 150 THEN 3
+             ELSE 4
+           END,
+           updated_at      = NOW()
+       FROM product_stock_by_branch psb,
+            monthly_controls mc
+       WHERE stock_controls.product_stock_id = psb.id
+         AND stock_controls.monthly_control_id = mc.id
+         AND mc.branch_id = $1
+         AND mc.status = 'draft'`,
+      [branch.id]
+    );
 
     await client.query("COMMIT");
   } catch (err) {
@@ -276,9 +336,25 @@ async function syncAllBranches() {
     }
   }
 
-  // Limpiar grupos huérfanos (marcas que pasaron a is_groupable=false)
+  // Limpiar grupos huérfanos (marcas que pasaron a is_groupable=false).
+  // Primero: eliminar filas de product_stock_by_branch del grupo huérfano
+  // que NO estén referenciadas por ningún control (draft o completed).
+  await pool.query(
+    `DELETE FROM product_stock_by_branch
+     WHERE group_id IN (
+       SELECT id FROM product_groups
+       WHERE id NOT IN (SELECT DISTINCT group_id FROM products WHERE group_id IS NOT NULL)
+     )
+     AND id NOT IN (
+       SELECT DISTINCT product_stock_id FROM stock_controls
+     )`
+  );
+
+  // Luego: eliminar grupos que ya no tienen ninguna referencia en product_stock_by_branch
   const deleted = await pool.query(
-    "DELETE FROM product_groups WHERE id NOT IN (SELECT DISTINCT group_id FROM products WHERE group_id IS NOT NULL)"
+    `DELETE FROM product_groups
+     WHERE id NOT IN (SELECT DISTINCT group_id FROM products WHERE group_id IS NOT NULL)
+       AND id NOT IN (SELECT DISTINCT group_id FROM product_stock_by_branch WHERE group_id IS NOT NULL)`
   );
   console.log(`✓ Grupos huérfanos eliminados: ${deleted.rowCount}`);
 

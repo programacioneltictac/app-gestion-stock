@@ -61,6 +61,10 @@ app.use("/api/product-groups", authenticateToken, productGroupRoutes);
 const syncRoutes = require("./routes/sync");
 app.use("/api/sync", authenticateToken, syncRoutes);
 
+// Rutas de ordenes de reposicion
+const orderRoutes = require("./routes/orders");
+app.use("/api/orders", authenticateToken, orderRoutes);
+
 // ==================== MANEJO DE ERRORES ====================
 
 app.use(notFoundHandler);

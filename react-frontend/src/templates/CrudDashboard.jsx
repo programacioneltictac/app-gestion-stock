@@ -7,6 +7,8 @@ import ProductList from "../components/ProductList";
 import BrandList from "../components/BrandList";
 import StockControlList from "../components/StockControlList";
 import StockControlShow from "../components/StockControlShow";
+import OrderList from "../components/OrderList";
+import OrderShow from "../components/OrderShow";
 import UsersList from "../components/UsersList";
 import UserCreate from "../components/UserCreate";
 import UserEdit from "../components/UserEdit";
@@ -75,6 +77,15 @@ const router = createHashRouter([
       {
         path: "/users/:userId/edit",
         Component: UserEdit,
+      },
+      // Orders routes
+      {
+        path: "/orders",
+        Component: OrderList,
+      },
+      {
+        path: "/orders/:orderId",
+        Component: OrderShow,
       },
       // Fallback route - redirect to dashboard
       {

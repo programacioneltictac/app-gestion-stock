@@ -52,7 +52,6 @@ export default function DashboardLayout() {
       sx={{
         position: 'relative',
         display: 'flex',
-        overflow: 'hidden',
         height: '100vh',
         width: '100%',
       }}

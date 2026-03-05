@@ -14,6 +14,7 @@ import { DataGrid, GridActionsCellItem, gridClasses } from "@mui/x-data-grid";
 import DeleteIcon from "@mui/icons-material/Delete";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import { useParams, useNavigate } from "react-router";
 import { useDialogs } from "../hooks/useDialogs/useDialogs";
 import useNotifications from "../hooks/useNotifications/useNotifications";
@@ -24,8 +25,9 @@ import {
   completeMonthlyControl,
   getAvailableProducts,
   getConditions,
+  getCurrentControl,
 } from "../data/stock";
-import { getCurrentControl } from "../data/stock";
+import { createOrderFromControl } from "../data/orders";
 import PageContainer from "./PageContainer";
 
 const STOCK_STATUS_COLOR = { 1: "error", 2: "success", 3: "warning", 4: "warning" };
@@ -123,6 +125,22 @@ export default function StockControlShow() {
     },
     [dialogs, notifications]
   );
+
+  const handleGenerateOrder = React.useCallback(async () => {
+    try {
+      const order = await createOrderFromControl(Number(controlId));
+      notifications.show('Orden de reposicion creada exitosamente', {
+        severity: 'success',
+        autoHideDuration: 3000,
+      });
+      navigate(`/orders/${order.id}`);
+    } catch (err) {
+      notifications.show(`Error al crear orden: ${err.message}`, {
+        severity: 'error',
+        autoHideDuration: 5000,
+      });
+    }
+  }, [controlId, navigate, notifications]);
 
   const handleCompleteControl = React.useCallback(async () => {
     const confirmed = await dialogs.confirm(
@@ -247,6 +265,16 @@ export default function StockControlShow() {
               startIcon={<CheckCircleIcon />}
             >
               Completar
+            </Button>
+          )}
+          {control?.status === "completed" && stats.needOrder > 0 && (
+            <Button
+              variant="outlined"
+              color="warning"
+              onClick={handleGenerateOrder}
+              startIcon={<ShoppingCartIcon />}
+            >
+              Generar orden ({stats.needOrder})
             </Button>
           )}
         </Stack>

@@ -13,6 +13,7 @@ import AssessmentIcon from "@mui/icons-material/Assessment";
 import StoreIcon from "@mui/icons-material/Store";
 import PeopleIcon from "@mui/icons-material/People";
 import LabelIcon from "@mui/icons-material/Label";
+import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import { matchPath, useLocation } from "react-router";
 import DashboardSidebarContext from "../context/DashboardSidebarContext";
 import { DRAWER_WIDTH, MINI_DRAWER_WIDTH } from "../constants";
@@ -145,13 +146,20 @@ function DashboardSidebar({
               width: mini ? MINI_DRAWER_WIDTH : "auto",
             }}
           >
-            <DashboardSidebarHeaderItem>Menú Principal</DashboardSidebarHeaderItem>
+            <DashboardSidebarHeaderItem>Menu Principal</DashboardSidebarHeaderItem>
             <DashboardSidebarPageItem
               id="dashboard"
               title="Dashboard"
               icon={<DashboardIcon />}
               href="/"
               selected={pathname === "/"}
+            />
+            <DashboardSidebarPageItem
+              id="orders"
+              title="Ordenes de Reposicion"
+              icon={<ShoppingCartIcon />}
+              href="/orders"
+              selected={!!matchPath('/orders/*', pathname)}
             />
             <DashboardSidebarPageItem
               id="stock-control"
