@@ -150,10 +150,37 @@ const updateItemReceived = async (req, res) => {
   }
 };
 
+// DELETE /api/orders/:id
+// Elimina una orden y sus items (solo admin/manager)
+const deleteOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (req.user.role === "employee") {
+      return res.status(403).json({ status: "error", message: "No tienes permiso para eliminar órdenes" });
+    }
+
+    const order = await Order.findById(id);
+    if (!order) {
+      return res.status(404).json({ status: "error", message: "Orden no encontrada" });
+    }
+    if (!canAccessBranch(req.user, order.branch_id)) {
+      return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
+    }
+
+    await Order.delete(id);
+    console.log(`Orden eliminada - ID: ${id}, Usuario: ${req.user.username}`);
+    res.json({ status: "success", message: "Orden eliminada exitosamente" });
+  } catch (error) {
+    handleControllerError(res, error, "Error eliminando orden:");
+  }
+};
+
 module.exports = {
   createFromControl,
   getOrders,
   getOrderDetail,
   updateStatus,
   updateItemReceived,
+  deleteOrder,
 };

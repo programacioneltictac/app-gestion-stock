@@ -24,6 +24,10 @@ class OrderService {
   async updateItemReceived(detailId, quantityReceived, notes = null) {
     return apiClient.patch(`/orders/items/${detailId}/received`, { quantity_received: quantityReceived, notes });
   }
+
+  async deleteOrder(orderId) {
+    return apiClient.delete(`/orders/${orderId}`);
+  }
 }
 
 const orderService = new OrderService();

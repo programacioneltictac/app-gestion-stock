@@ -275,7 +275,7 @@ async function syncBranch(branch, groupableBrands) {
        SET stock_current   = psb.stock,
            stock_status_id = CASE
              WHEN stock_controls.stock_require = 0 THEN 2
-             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) < 50  THEN 1
+             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) < 70  THEN 1
              WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) <= 100 THEN 2
              WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) <= 150 THEN 3
              ELSE 4

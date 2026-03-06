@@ -115,6 +115,17 @@ class MonthlyControl {
   }
 
   static async delete(id) {
+    // Verificar si hay ordenes de reposicion asociadas
+    const ordersResult = await pool.query(
+      "SELECT id FROM orders_controls WHERE monthly_control_id = $1 LIMIT 1",
+      [id]
+    );
+    if (ordersResult.rows.length > 0) {
+      const err = new Error("No se puede eliminar un control que tiene órdenes de reposición asociadas. Elimine las órdenes primero.");
+      err.code = "HAS_ORDERS";
+      throw err;
+    }
+
     await pool.query("BEGIN");
     try {
       await pool.query(

@@ -12,14 +12,17 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import { DataGrid, gridClasses } from '@mui/x-data-grid';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
 import { useParams, useNavigate } from 'react-router';
+import { useDialogs } from '../hooks/useDialogs/useDialogs';
 import useNotifications from '../hooks/useNotifications/useNotifications';
 import { useAuth } from '../context/AuthContext';
 import {
   getOrderDetail,
   updateOrderStatus,
   updateOrderItemReceived,
+  deleteOrder,
   getOrderStatusLabel,
   getOrderStatusColor,
 } from '../data/orders';
@@ -40,6 +43,7 @@ const STATUS_OPTIONS = [
 export default function OrderShow() {
   const { orderId } = useParams();
   const navigate = useNavigate();
+  const dialogs = useDialogs();
   const notifications = useNotifications();
   const { user } = useAuth();
 
@@ -60,6 +64,33 @@ export default function OrderShow() {
 
   const isEmployee = user?.role === 'employee';
   const canEditStatus = !isEmployee;
+  const canDelete = !isEmployee;
+
+  const handleDelete = React.useCallback(async () => {
+    if (!order) return;
+    const confirmed = await dialogs.confirm(
+      `¿Deseas eliminar la orden #${order.id} (${order.branchName} — ${order.period})?`,
+      {
+        title: '¿Eliminar orden?',
+        severity: 'error',
+        okText: 'Eliminar',
+        cancelText: 'Cancelar',
+      }
+    );
+    if (!confirmed) return;
+    try {
+      await deleteOrder(order.id);
+      notifications.show('Orden eliminada', { severity: 'success', autoHideDuration: 3000 });
+      navigate('/orders');
+    } catch (err) {
+      notifications.show(`Error: ${err.message}`, { severity: 'error', autoHideDuration: 5000 });
+    }
+  }, [order, dialogs, notifications, navigate]);
+
+  // Sincronizar el Autocomplete de estado cuando la orden cambia
+  React.useEffect(() => {
+    if (order) setNewStatus(order.status);
+  }, [order]);
 
   const loadData = React.useCallback(async () => {
     setError(null);
@@ -68,7 +99,6 @@ export default function OrderShow() {
       const { order: orderData, items: itemsData } = await getOrderDetail(orderId);
       setOrder(orderData);
       setItems(itemsData);
-      setNewStatus(orderData.status);
       setStatusNotes(orderData.notes || '');
     } catch (err) {
       setError(err);
@@ -233,11 +263,20 @@ export default function OrderShow() {
         { title: `Orden #${order?.id}` },
       ]}
       actions={
-        <Tooltip title="Volver" enterDelay={1000}>
-          <IconButton size="small" onClick={() => navigate('/orders')}>
-            <ArrowBackIcon />
-          </IconButton>
-        </Tooltip>
+        <Stack direction="row" spacing={1}>
+          {canDelete && (
+            <Tooltip title="Eliminar orden" enterDelay={1000}>
+              <IconButton size="small" color="error" onClick={handleDelete}>
+                <DeleteIcon />
+              </IconButton>
+            </Tooltip>
+          )}
+          <Tooltip title="Volver" enterDelay={1000}>
+            <IconButton size="small" onClick={() => navigate('/orders')}>
+              <ArrowBackIcon />
+            </IconButton>
+          </Tooltip>
+        </Stack>
       }
     >
       {/* Header con estado y costo total */}

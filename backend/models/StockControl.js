@@ -1,8 +1,8 @@
 const { pool } = require("../database/config");
 
 const STOCK_STATUS = {
-  NEED_ORDER:  1,  // < 50%
-  OPTIMAL:     2,  // 50–100%
+  NEED_ORDER:  1,  // < 70%
+  OPTIMAL:     2,  // 70–100%
   EXCESS:      3,  // 101–150%
   HIGH_EXCESS: 4,  // > 150%
 };
@@ -21,7 +21,7 @@ class StockControl {
    * Determina el stock_status_id según compliance.
    */
   static determineStockStatus(compliance) {
-    if (compliance < 50)  return STOCK_STATUS.NEED_ORDER;
+    if (compliance < 70)  return STOCK_STATUS.NEED_ORDER;
     if (compliance <= 100) return STOCK_STATUS.OPTIMAL;
     if (compliance <= 150) return STOCK_STATUS.EXCESS;
     return STOCK_STATUS.HIGH_EXCESS;

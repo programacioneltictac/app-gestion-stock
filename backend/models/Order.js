@@ -247,6 +247,24 @@ class Order {
   }
 
   /**
+   * Elimina una orden y sus detalles.
+   */
+  static async delete(id) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM order_details WHERE order_control_id = $1", [id]);
+      await client.query("DELETE FROM orders_controls WHERE id = $1", [id]);
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Verifica si un monthly_control ya tiene al menos una orden generada.
    */
   static async existsForControl(monthlyControlId) {

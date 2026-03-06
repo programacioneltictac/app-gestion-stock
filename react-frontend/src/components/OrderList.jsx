@@ -11,9 +11,12 @@ import Typography from '@mui/material/Typography';
 import { DataGrid, GridActionsCellItem, gridClasses } from '@mui/x-data-grid';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useNavigate } from 'react-router';
+import { useDialogs } from '../hooks/useDialogs/useDialogs';
+import useNotifications from '../hooks/useNotifications/useNotifications';
 import { useAuth } from '../context/AuthContext';
-import { getOrders, getOrderStatusLabel, getOrderStatusColor } from '../data/orders';
+import { getOrders, deleteOrder, getOrderStatusLabel, getOrderStatusColor } from '../data/orders';
 import { getBranchesList } from '../data/branches';
 import PageContainer from './PageContainer';
 
@@ -24,6 +27,8 @@ const ALL_STATUSES = ['pending', 'sent', 'partial', 'completed', 'cancelled'];
 
 export default function OrderList() {
   const navigate = useNavigate();
+  const dialogs = useDialogs();
+  const notifications = useNotifications();
   const { user } = useAuth();
 
   const [orders, setOrders] = React.useState([]);
@@ -68,6 +73,29 @@ export default function OrderList() {
     [navigate]
   );
 
+  const handleRowDelete = React.useCallback(
+    (order) => async () => {
+      const confirmed = await dialogs.confirm(
+        `¿Deseas eliminar la orden #${order.id} (${order.branchName} — ${order.period})?`,
+        {
+          title: '¿Eliminar orden?',
+          severity: 'error',
+          okText: 'Eliminar',
+          cancelText: 'Cancelar',
+        }
+      );
+      if (!confirmed) return;
+      try {
+        await deleteOrder(order.id);
+        notifications.show('Orden eliminada', { severity: 'success', autoHideDuration: 3000 });
+        loadData();
+      } catch (err) {
+        notifications.show(`Error: ${err.message}`, { severity: 'error', autoHideDuration: 5000 });
+      }
+    },
+    [dialogs, notifications, loadData]
+  );
+
   const columns = React.useMemo(
     () => [
       { field: 'id', headerName: 'ID', width: 70 },
@@ -110,7 +138,7 @@ export default function OrderList() {
         field: 'actions',
         type: 'actions',
         headerName: '',
-        width: 60,
+        width: 80,
         getActions: ({ row }) => [
           <GridActionsCellItem
             key="view"
@@ -118,10 +146,18 @@ export default function OrderList() {
             label="Ver detalle"
             onClick={handleRowView(row)}
           />,
+          ...(!isEmployee ? [
+            <GridActionsCellItem
+              key="delete"
+              icon={<DeleteIcon />}
+              label="Eliminar"
+              onClick={handleRowDelete(row)}
+            />,
+          ] : []),
         ],
       },
     ],
-    [handleRowView]
+    [handleRowView, handleRowDelete, isEmployee]
   );
 
   return (

@@ -98,3 +98,7 @@ export async function updateOrderItemReceived(detailId, quantityReceived, notes 
     items: (data.items || []).map(transformOrderItemFromBackend),
   };
 }
+
+export async function deleteOrder(orderId) {
+  await orderService.deleteOrder(orderId);
+}
