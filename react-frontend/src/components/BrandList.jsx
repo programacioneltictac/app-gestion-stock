@@ -4,7 +4,8 @@ import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import Stack from "@mui/material/Stack";
 import Switch from "@mui/material/Switch";
-import { DataGrid, gridClasses } from "@mui/x-data-grid";
+import { DataGrid } from "@mui/x-data-grid";
+import { dataGridSx, dataGridLoadingSlotProps } from "./dataGridStyles";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import useNotifications from "../hooks/useNotifications/useNotifications";
 import apiClient from "../services/apiClient";
@@ -178,19 +179,9 @@ export default function BrandList() {
             initialState={initialState}
             showToolbar
             pageSizeOptions={[25, INITIAL_PAGE_SIZE, 100]}
-            sx={{
-              [`& .${gridClasses.columnHeader}, & .${gridClasses.cell}`]: {
-                outline: "transparent",
-              },
-              [`& .${gridClasses.columnHeader}:focus-within, & .${gridClasses.cell}:focus-within`]: {
-                outline: "none",
-              },
-            }}
+            sx={dataGridSx}
             slotProps={{
-              loadingOverlay: {
-                variant: "circular-progress",
-                noRowsVariant: "circular-progress",
-              },
+              ...dataGridLoadingSlotProps,
               baseIconButton: { size: "small" },
             }}
           />

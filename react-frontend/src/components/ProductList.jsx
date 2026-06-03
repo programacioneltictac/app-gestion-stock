@@ -5,7 +5,8 @@ import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Stack from "@mui/material/Stack";
-import { DataGrid, gridClasses } from "@mui/x-data-grid";
+import { DataGrid } from "@mui/x-data-grid";
+import { dataGridSx, dataGridLoadingSlotProps } from "./dataGridStyles";
 import SyncIcon from "@mui/icons-material/Sync";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import useNotifications from "../hooks/useNotifications/useNotifications";
@@ -182,19 +183,9 @@ export default function ProductList() {
             initialState={initialState}
             showToolbar
             pageSizeOptions={[25, INITIAL_PAGE_SIZE, 100, 200]}
-            sx={{
-              [`& .${gridClasses.columnHeader}, & .${gridClasses.cell}`]: {
-                outline: "transparent",
-              },
-              [`& .${gridClasses.columnHeader}:focus-within, & .${gridClasses.cell}:focus-within`]: {
-                outline: "none",
-              },
-            }}
+            sx={dataGridSx}
             slotProps={{
-              loadingOverlay: {
-                variant: "circular-progress",
-                noRowsVariant: "circular-progress",
-              },
+              ...dataGridLoadingSlotProps,
               baseIconButton: { size: "small" },
             }}
           />
