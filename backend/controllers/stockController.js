@@ -245,16 +245,6 @@ const getBranchesSummary = async (req, res) => {
   }
 };
 
-// GET /api/stock/conditions
-const getConditions = async (req, res) => {
-  try {
-    const result = await pool.query("SELECT id, condition_name FROM conditions ORDER BY id");
-    res.json({ status: "success", conditions: result.rows });
-  } catch (error) {
-    handleControllerError(res, error, "Error obteniendo condiciones:");
-  }
-};
-
 module.exports = {
   createMonthlyControl,
   getCurrentMonthlyControl,
@@ -265,6 +255,5 @@ module.exports = {
   upsertStockItem,
   deleteStockItem,
   getAvailableProducts,
-  getConditions,
   getBranchesSummary,
 };

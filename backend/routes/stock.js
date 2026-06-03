@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const stockController = require("../controllers/stockController");
 const branchController = require("../controllers/branchController");
+const catalogController = require("../controllers/catalogController");
 
 // ==================== MONTHLY CONTROLS ====================
 
@@ -38,8 +39,8 @@ router.get("/available-products/:branch_id", stockController.getAvailableProduct
 
 // ==================== CONDITIONS ====================
 
-// GET /api/stock/conditions
-router.get("/conditions", stockController.getConditions);
+// GET /api/stock/conditions  — alias mantenido por compatibilidad con frontend
+router.get("/conditions", catalogController.getConditions);
 
 // ==================== BRANCHES ====================
 

@@ -58,25 +58,22 @@ class User {
   }
 
   static async update(id, username, password, role, branch_id) {
-    // Si se proporciona una nueva contraseña, hashearla
-    if (password) {
-      const password_hash = await bcrypt.hash(
-        password,
-        Number(process.env.SALT_ROUNDS) || 12
-      );
-      const result = await pool.query(
-        "UPDATE users SET username = $1, password_hash = $2, role = $3, branch_id = $4 WHERE id = $5 RETURNING id",
-        [username, password_hash, role, branch_id, id]
-      );
-      return result.rows[0];
-    } else {
-      // Si no se proporciona contraseña, no actualizarla
-      const result = await pool.query(
-        "UPDATE users SET username = $1, role = $2, branch_id = $3 WHERE id = $4 RETURNING id",
-        [username, role, branch_id, id]
-      );
-      return result.rows[0];
-    }
+    const password_hash = password
+      ? await bcrypt.hash(password, Number(process.env.SALT_ROUNDS) || 12)
+      : null;
+
+    // COALESCE preserva el password_hash actual cuando no se envia uno nuevo
+    const result = await pool.query(
+      `UPDATE users
+       SET username      = $1,
+           password_hash = COALESCE($2, password_hash),
+           role          = $3,
+           branch_id     = $4
+       WHERE id = $5
+       RETURNING id`,
+      [username, password_hash, role, branch_id, id]
+    );
+    return result.rows[0];
   }
 
   static async delete(id) {

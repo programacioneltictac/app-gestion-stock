@@ -11,6 +11,7 @@
 const BUSINESS_ERROR_CODES = ["HAS_ORDERS"];
 
 const handleControllerError = (res, error, customMessage = null) => {
+  // El contexto interno (customMessage) solo va al log, nunca al cliente.
   console.error("❌", customMessage || "Error:", error.message);
 
   // Errores de negocio conocidos: devolver 400 con el mensaje real
@@ -23,7 +24,7 @@ const handleControllerError = (res, error, customMessage = null) => {
 
   res.status(500).json({
     status: "error",
-    message: customMessage || "Error interno del servidor",
+    message: "Error interno del servidor",
   });
 };
 
