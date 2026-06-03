@@ -75,7 +75,6 @@ export function getStockStatuses() {
   return [
     { id: 1, name: 'Generar Pedido', color: '#dc3545' },
     { id: 2, name: 'Stock Óptimo', color: '#28a745' },
-    { id: 3, name: 'Excedido', color: '#ffc107' },
-    { id: 4, name: 'Muy Excedido', color: '#fd7e14' },
+    { id: 3, name: 'Sobrestock', color: '#ffc107' },
   ];
 }

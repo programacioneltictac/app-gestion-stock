@@ -68,10 +68,10 @@ class MonthlyControl {
       `SELECT mc.*, b.name as branch_name, b.code as branch_code,
               u.username as created_by_username,
               COUNT(sc.id) as total_items,
-              COUNT(CASE WHEN ss.stock_status_name = 'generar_pedido' THEN 1 END) as need_order_items,
-              COUNT(CASE WHEN ss.stock_status_name = 'stock_optimo' THEN 1 END) as optimal_items,
-              COUNT(CASE WHEN ss.stock_status_name = 'excedido' THEN 1 END) as excess_items,
-              COUNT(CASE WHEN ss.stock_status_name = 'muy_excedido' THEN 1 END) as high_excess_items,
+              COUNT(CASE WHEN sc.stock_status_id = 1 THEN 1 END) as need_order_items,
+              COUNT(CASE WHEN sc.stock_status_id = 2 THEN 1 END) as optimal_items,
+              COUNT(CASE WHEN sc.stock_status_id = 3 THEN 1 END) as excess_items,
+              0 as high_excess_items,
               ROUND(AVG(
                 CASE
                   WHEN sc.stock_require = 0 THEN 100
@@ -96,10 +96,10 @@ class MonthlyControl {
     const result = await pool.query(
       `SELECT
          COUNT(*) as total_items,
-         COUNT(CASE WHEN ss.stock_status_name = 'generar_pedido' THEN 1 END) as need_order,
-         COUNT(CASE WHEN ss.stock_status_name = 'stock_optimo' THEN 1 END) as optimal,
-         COUNT(CASE WHEN ss.stock_status_name = 'excedido' THEN 1 END) as excess,
-         COUNT(CASE WHEN ss.stock_status_name = 'muy_excedido' THEN 1 END) as high_excess,
+         COUNT(CASE WHEN sc.stock_status_id = 1 THEN 1 END) as need_order,
+         COUNT(CASE WHEN sc.stock_status_id = 2 THEN 1 END) as optimal,
+         COUNT(CASE WHEN sc.stock_status_id = 3 THEN 1 END) as excess,
+         0 as high_excess,
          ROUND(AVG(
            CASE
              WHEN sc.stock_require = 0 THEN 100
@@ -126,17 +126,20 @@ class MonthlyControl {
       throw err;
     }
 
-    await pool.query("BEGIN");
+    const client = await pool.connect();
     try {
-      await pool.query(
+      await client.query("BEGIN");
+      await client.query(
         "DELETE FROM stock_controls WHERE monthly_control_id = $1",
         [id]
       );
-      await pool.query("DELETE FROM monthly_controls WHERE id = $1", [id]);
-      await pool.query("COMMIT");
+      await client.query("DELETE FROM monthly_controls WHERE id = $1", [id]);
+      await client.query("COMMIT");
     } catch (error) {
-      await pool.query("ROLLBACK");
+      await client.query("ROLLBACK");
       throw error;
+    } finally {
+      client.release();
     }
   }
 

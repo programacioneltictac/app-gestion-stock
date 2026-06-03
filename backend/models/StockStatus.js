@@ -1,4 +1,5 @@
 const { pool } = require("../database/config");
+const StockControl = require("./StockControl");
 
 class StockStatus {
   static async findAll() {
@@ -16,11 +17,9 @@ class StockStatus {
     return result.rows[0] || null;
   }
 
+  // Delega en StockControl, la única fuente de verdad de los umbrales.
   static determineStockStatus(compliance) {
-    if (compliance < 70) return 1; // generar_pedido
-    if (compliance >= 70 && compliance <= 100) return 2; // stock_optimo
-    if (compliance > 100 && compliance <= 150) return 3; // excedido
-    return 4; // muy_excedido
+    return StockControl.determineStockStatus(compliance);
   }
 }
 

@@ -6,7 +6,8 @@ import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 import Chip from "@mui/material/Chip";
-import { DataGrid, GridActionsCellItem, gridClasses } from "@mui/x-data-grid";
+import { DataGrid, GridActionsCellItem } from "@mui/x-data-grid";
+import { dataGridClickableSx, dataGridLoadingSlotProps } from "./dataGridStyles";
 import AddIcon from "@mui/icons-material/Add";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import VisibilityIcon from "@mui/icons-material/Visibility";
@@ -188,7 +189,7 @@ export default function StockControlList() {
       },
       { field: "needOrderItems", headerName: "Pedidos", width: 100 },
       { field: "optimalItems", headerName: "Óptimo", width: 100 },
-      { field: "excessItems", headerName: "Excedidos", width: 100 },
+      { field: "excessItems", headerName: "Sobrestock", width: 100 },
       {
         field: "createdAt",
         headerName: "Fecha Creación",
@@ -291,24 +292,8 @@ export default function StockControlList() {
             initialState={{
               pagination: { paginationModel: { pageSize: 10 } },
             }}
-            sx={{
-              [`& .${gridClasses.columnHeader}, & .${gridClasses.cell}`]: {
-                outline: "transparent",
-              },
-              [`& .${gridClasses.columnHeader}:focus-within, & .${gridClasses.cell}:focus-within`]:
-                {
-                  outline: "none",
-                },
-              [`& .${gridClasses.row}:hover`]: {
-                cursor: "pointer",
-              },
-            }}
-            slotProps={{
-              loadingOverlay: {
-                variant: "circular-progress",
-                noRowsVariant: "circular-progress",
-              },
-            }}
+            sx={dataGridClickableSx}
+            slotProps={dataGridLoadingSlotProps}
           />
         )}
       </Box>

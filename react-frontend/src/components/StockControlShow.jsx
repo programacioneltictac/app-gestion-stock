@@ -10,7 +10,8 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
-import { DataGrid, GridActionsCellItem, gridClasses } from "@mui/x-data-grid";
+import { DataGrid, GridActionsCellItem } from "@mui/x-data-grid";
+import { dataGridSx } from "./dataGridStyles";
 import DeleteIcon from "@mui/icons-material/Delete";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
@@ -233,7 +234,7 @@ export default function StockControlShow() {
     const total = items.length;
     const needOrder = items.filter((i) => i.stockStatusId === 1).length;
     const optimal = items.filter((i) => i.stockStatusId === 2).length;
-    const excess = items.filter((i) => i.stockStatusId === 3 || i.stockStatusId === 4).length;
+    const excess = items.filter((i) => i.stockStatusId === 3).length;
     const avg =
       total > 0 ? items.reduce((sum, i) => sum + (Number(i.compliance) || 0), 0) / total : 0;
     return { total, needOrder, optimal, excess, avg };
@@ -291,7 +292,7 @@ export default function StockControlShow() {
           <Typography variant="body2">Total: <strong>{stats.total}</strong></Typography>
           <Typography variant="body2" color="error.main">Pedido: <strong>{stats.needOrder}</strong></Typography>
           <Typography variant="body2" color="success.main">Óptimo: <strong>{stats.optimal}</strong></Typography>
-          <Typography variant="body2" color="warning.main">Excedido: <strong>{stats.excess}</strong></Typography>
+          <Typography variant="body2" color="warning.main">Sobrestock: <strong>{stats.excess}</strong></Typography>
           <Typography variant="body2">Compliance: <strong>{stats.avg.toFixed(1)}%</strong></Typography>
         </Stack>
       )}
@@ -355,14 +356,7 @@ export default function StockControlShow() {
             autoHeight
             pageSizeOptions={[25, 50, 100]}
             initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
-            sx={{
-              [`& .${gridClasses.columnHeader}, & .${gridClasses.cell}`]: {
-                outline: "transparent",
-              },
-              [`& .${gridClasses.columnHeader}:focus-within, & .${gridClasses.cell}:focus-within`]: {
-                outline: "none",
-              },
-            }}
+            sx={dataGridSx}
           />
         </Box>
       )}

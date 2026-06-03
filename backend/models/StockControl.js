@@ -1,10 +1,11 @@
 const { pool } = require("../database/config");
 
+// Fuente de verdad de los umbrales de compliance → stock_status.
+// 3 estados: <70% genera pedido, 70-120% óptimo, >120% sobrestock.
 const STOCK_STATUS = {
-  NEED_ORDER:  1,  // < 70%
-  OPTIMAL:     2,  // 70–100%
-  EXCESS:      3,  // 101–150%
-  HIGH_EXCESS: 4,  // > 150%
+  NEED_ORDER: 1, // < 70%   "Generar Pedido"
+  OPTIMAL:    2, // 70–120% "Stock Optimo"
+  OVERSTOCK:  3, // > 120%  "Sobrestock"
 };
 
 class StockControl {
@@ -21,10 +22,9 @@ class StockControl {
    * Determina el stock_status_id según compliance.
    */
   static determineStockStatus(compliance) {
-    if (compliance < 70)  return STOCK_STATUS.NEED_ORDER;
-    if (compliance <= 100) return STOCK_STATUS.OPTIMAL;
-    if (compliance <= 150) return STOCK_STATUS.EXCESS;
-    return STOCK_STATUS.HIGH_EXCESS;
+    if (compliance < 70)   return STOCK_STATUS.NEED_ORDER;
+    if (compliance <= 120) return STOCK_STATUS.OPTIMAL;
+    return STOCK_STATUS.OVERSTOCK;
   }
 
   /**
@@ -77,7 +77,7 @@ class StockControl {
          (sc.stock_current - sc.stock_require)                  AS stock_difference,
          CASE
            WHEN sc.stock_require = 0 THEN 100
-           ELSE ROUND((sc.stock_current::numeric / sc.stock_require::numeric) * 100, 1)
+           ELSE ROUND((sc.stock_current::numeric / sc.stock_require::numeric) * 100)
          END                                                     AS compliance,
          sc.stock_status_id,
          ss.stock_status_name,
