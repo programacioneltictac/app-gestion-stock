@@ -14,6 +14,34 @@ const { parseProductName, detectGroup } = require("./nameParser");
 
 const API_URL = "http://igd.iduo.com.ar/indexinterno.php";
 const API_TOKEN = process.env.EXTERNAL_API_KEY;
+const API_TIMEOUT_MS = Number(process.env.EXTERNAL_API_TIMEOUT_MS);
+const API_RETRY_ATTEMPTS = Number(process.env.EXTERNAL_API_RETRIES);
+const API_RETRY_DELAY_MS = 2000;
+// Filtro de stock para la API: 'todos' trae catálogo completo;
+// 'stockmayoracero' trae solo productos con stock > 0 (más rápido).
+const STOCK_FILTER = process.env.SYNC_STOCK_FILTER || "stockmayoracero";
+// Cantidad de sucursales a sincronizar en paralelo.
+// Cada sucursal toma 1 conexión del pool y hace requests independientes a la API.
+// Subir con cuidado: la API externa puede tener límites de concurrencia.
+const SYNC_CONCURRENCY = Math.max(1, Number(process.env.SYNC_CONCURRENCY));
+// Pausa entre requests consecutivos a la API dentro de una misma sucursal.
+// Evita ráfagas que saturen al proveedor externo.
+const REQUEST_DELAY_MS = Math.max(
+  0,
+  Number(process.env.SYNC_REQUEST_DELAY_MS) || 0,
+);
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function formatDuration(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
 
 /**
  * Obtiene productos desde la API externa para una sucursal/categoría dados.
@@ -22,7 +50,11 @@ const API_TOKEN = process.env.EXTERNAL_API_KEY;
  * @param {string} apiProductId      - ID de producto padre de la categoría
  * @returns {Array} Array de productos crudos de la API
  */
-async function fetchProductsFromApi(apiBranchCode, apiDepositCode, apiProductId) {
+async function fetchProductsFromApi(
+  apiBranchCode,
+  apiDepositCode,
+  apiProductId,
+) {
   const today = new Date();
   const dia = today.getDate();
   const mes = today.getMonth() + 1;
@@ -30,7 +62,7 @@ async function fetchProductsFromApi(apiBranchCode, apiDepositCode, apiProductId)
 
   // Construir query string manualmente para evitar encoding de corchetes
   let qs = `PAG=Listadostock&opcionfechahasta=Personalizar&diahasta=${dia}&meshasta=${mes}&anohasta=${ano}`;
-  qs += `&mostrarpreciocosto=1&filtrostockcero=todos`;
+  qs += `&mostrarpreciocosto=1&filtrostockcero=${STOCK_FILTER}`;
   qs += `&idsucursalgrupo[0]=${apiBranchCode}`;
   qs += `&idproducto[0]=${apiProductId}`;
 
@@ -38,21 +70,49 @@ async function fetchProductsFromApi(apiBranchCode, apiDepositCode, apiProductId)
     qs += `&iddeposito[0]=${apiDepositCode}`;
   }
 
-  const response = await axios.get(`${API_URL}?${qs}`, {
-    headers: { Token: API_TOKEN },
-    timeout: 60000,
-  });
+  // Reintentar ante errores transitorios (timeout, ECONN*, 5xx).
+  // Errores de payload de la API (hayerror) NO se reintentan: son determinísticos.
+  let lastError;
+  for (let attempt = 1; attempt <= API_RETRY_ATTEMPTS + 1; attempt++) {
+    try {
+      const response = await axios.get(`${API_URL}?${qs}`, {
+        // Accept-Encoding: identity + decompress:false: pedimos la respuesta SIN
+        // comprimir. La API a veces declara gzip pero manda bytes inválidos,
+        // lo que rompe la descompresión con "incorrect header check" (Z_DATA_ERROR).
+        headers: { Token: API_TOKEN, "Accept-Encoding": "identity" },
+        decompress: false,
+        timeout: API_TIMEOUT_MS,
+      });
 
-  // La API devuelve { hayerror: true, error: "..." } si algo falla
-  if (response.data && response.data.hayerror) {
-    throw new Error(`Error de API externa: ${response.data.error}`);
+      if (response.data && response.data.hayerror) {
+        throw new Error(`Error de API externa: ${response.data.error}`);
+      }
+
+      if (!Array.isArray(response.data)) {
+        throw new Error("La API no devolvió un array de productos");
+      }
+
+      return response.data;
+    } catch (err) {
+      lastError = err;
+      const isTransient =
+        err.code === "ECONNABORTED" || // timeout de axios
+        err.code === "ECONNRESET" ||
+        err.code === "ETIMEDOUT" ||
+        err.code === "Z_DATA_ERROR" || // descompresión: respuesta corrupta
+        err.code === "Z_BUF_ERROR" ||
+        /incorrect header check/i.test(err.message || "") ||
+        (err.response && err.response.status >= 500);
+
+      if (!isTransient || attempt > API_RETRY_ATTEMPTS) throw err;
+
+      console.log(
+        `    Reintento ${attempt}/${API_RETRY_ATTEMPTS} tras error: ${err.message}`,
+      );
+      await sleep(API_RETRY_DELAY_MS);
+    }
   }
-
-  if (!Array.isArray(response.data)) {
-    throw new Error("La API no devolvió un array de productos");
-  }
-
-  return response.data;
+  throw lastError;
 }
 
 /**
@@ -61,31 +121,50 @@ async function fetchProductsFromApi(apiBranchCode, apiDepositCode, apiProductId)
  * @returns {{ externalId, productName, codigos, stock, costPrice }}
  */
 function extractApiFields(apiProduct) {
-  const unit = Array.isArray(apiProduct.unidades) && apiProduct.unidades.length > 0
-    ? apiProduct.unidades[0]
-    : {};
+  const unit =
+    Array.isArray(apiProduct.unidades) && apiProduct.unidades.length > 0
+      ? apiProduct.unidades[0]
+      : {};
 
   return {
-    externalId:  String(apiProduct.idproducto || ""),
+    externalId: String(apiProduct.idproducto || ""),
     productName: String(apiProduct.nombreproducto || "").trim(),
-    codigos:     String(apiProduct.codigos || "").trim(),
-    stock:       Math.max(0, parseInt(unit.stock ?? 0, 10)),
-    costPrice:   parseFloat((parseFloat(unit.preciocosto ?? 0) / 1.21).toFixed(2)),
+    codigos: String(apiProduct.codigos || "").trim(),
+    stock: Math.max(0, parseInt(unit.stock ?? 0, 10)),
+    costPrice: parseFloat(
+      (parseFloat(unit.preciocosto ?? 0) / 1.21).toFixed(2),
+    ),
   };
+}
+
+/**
+ * Obtiene marcas agrupables ordenadas por longitud descendente
+ * (necesario para que matches de marcas compuestas tengan prioridad).
+ */
+async function getGroupableBrands() {
+  const result = await pool.query(
+    "SELECT id, brand_name FROM brands WHERE is_groupable = true AND is_active = true ORDER BY LENGTH(brand_name) DESC",
+  );
+  return result.rows;
 }
 
 /**
  * Sincroniza los productos de UNA sucursal iterando todas las categorías con api_product_id.
  * @param {Object} branch - Objeto branch con id, api_branch_code, api_deposit_code
- * @param {Array}  groupableBrands - Marcas agrupables [{id, brand_name}]
+ * @param {Array|null} groupableBrands - Marcas agrupables [{id, brand_name}]; si null se consultan
  * @returns {{ synced: number, grouped: number, errors: number }}
  */
-async function syncBranch(branch, groupableBrands) {
+async function syncBranch(branch, groupableBrands = null) {
   const stats = { synced: 0, grouped: 0, errors: 0 };
 
-  // Obtener categorías con api_product_id configurado
+  if (!groupableBrands) {
+    groupableBrands = await getGroupableBrands();
+  }
+
+  // Obtener categorías con api_product_id configurado.
+  // name_keywords: variantes del rubro al final del nombre, para limpiar el sufijo.
   const categoriesResult = await pool.query(
-    "SELECT id, category_name, api_product_id FROM categories WHERE api_product_id IS NOT NULL AND is_active = true"
+    "SELECT id, category_name, api_product_id, name_keywords FROM categories WHERE api_product_id IS NOT NULL AND is_active = true",
   );
   const categories = categoriesResult.rows;
 
@@ -94,20 +173,39 @@ async function syncBranch(branch, groupableBrands) {
     return stats;
   }
 
-  // Recopilar productos de cada categoría junto con su category_id
+  // Recopilar productos de cada categoría junto con su category_id.
+  // Se aplica REQUEST_DELAY_MS entre requests para no saturar al proveedor externo.
   const rawProducts = [];
-  for (const category of categories) {
+  for (let idx = 0; idx < categories.length; idx++) {
+    const category = categories[idx];
     try {
       const products = await fetchProductsFromApi(
         branch.api_branch_code,
         branch.api_deposit_code,
-        category.api_product_id
+        category.api_product_id,
       );
-      console.log(`  Categoría ${category.category_name}: ${products.length} productos`);
-      products.forEach(p => rawProducts.push({ raw: p, categoryId: category.id }));
+      console.log(
+        `  [${branch.name}] Categoría ${category.category_name}: ${products.length} productos`,
+      );
+      products.forEach((p) =>
+        rawProducts.push({
+          raw: p,
+          categoryId: category.id,
+          categoryName: category.category_name,
+          nameKeywords: category.name_keywords || [],
+        }),
+      );
     } catch (err) {
-      console.error(`  Error en categoría ${category.category_name}:`, err.message);
+      console.error(
+        `  [${branch.name}] Error en categoría ${category.category_name}:`,
+        err.message,
+      );
       stats.errors++;
+    }
+
+    // Pausa entre categorías (no después de la última)
+    if (REQUEST_DELAY_MS > 0 && idx < categories.length - 1) {
+      await sleep(REQUEST_DELAY_MS);
     }
   }
 
@@ -121,20 +219,39 @@ async function syncBranch(branch, groupableBrands) {
       `UPDATE product_stock_by_branch
        SET stock = 0, avg_cost = 0, cost_item_count = 0, last_sync_at = NOW()
        WHERE branch_id = $1`,
-      [branch.id]
+      [branch.id],
     );
 
     // Cache de grupos ya creados en esta sync para no re-consultar
     const groupCache = {};
 
-    for (const { raw, categoryId: currentCategoryId } of rawProducts) {
+    for (const {
+      raw,
+      categoryId: currentCategoryId,
+      categoryName: currentCategoryName,
+      nameKeywords: currentNameKeywords,
+    } of rawProducts) {
+      // SAVEPOINT por iteracion: si un producto falla (ej: UNIQUE violation),
+      // se hace ROLLBACK solo de ese producto y la transaccion sigue viva
+      // para los siguientes. Sin esto, un solo error envenena toda la sync.
+      await client.query("SAVEPOINT sp_product");
       try {
-        const { externalId, productName, codigos, stock, costPrice } = extractApiFields(raw);
+        const { externalId, productName, codigos, stock, costPrice } =
+          extractApiFields(raw);
 
-        if (!externalId || !productName) continue;
+        if (!externalId || !productName) {
+          await client.query("RELEASE SAVEPOINT sp_product");
+          continue;
+        }
 
-        const { cleanName, rubro } = parseProductName(productName);
-        const groupInfo = detectGroup(cleanName, rubro, groupableBrands);
+        // El rubro lo aporta la categoría del request (no se adivina del nombre).
+        // Los keywords solo se usan para limpiar el sufijo "MM-AA RUBRO" del nombre.
+        const { cleanName } = parseProductName(productName, currentNameKeywords);
+        const groupInfo = detectGroup(
+          cleanName,
+          currentCategoryName,
+          groupableBrands,
+        );
 
         // --- Resolver group_id si corresponde ---
         let groupId = null;
@@ -155,10 +272,10 @@ async function syncBranch(branch, groupableBrands) {
               [
                 groupInfo.brandId,
                 groupInfo.brandKeyword,
-                rubro,
+                currentCategoryName,
                 groupInfo.displayName,
                 groupInfo.groupKey,
-              ]
+              ],
             );
             groupCache[cacheKey] = groupResult.rows[0].id;
             stats.grouped++;
@@ -167,8 +284,8 @@ async function syncBranch(branch, groupableBrands) {
           groupId = groupCache[cacheKey];
         }
 
-        // --- Upsert del producto (incluye cost_price) ---
-        await client.query(
+        // --- Upsert del producto (incluye cost_price). RETURNING evita un SELECT extra. ---
+        const productResult = await client.query(
           `INSERT INTO products
              (product_name, product_code, external_id, display_name,
               group_id, is_grouped, category_id, cost_price, last_sync_at, is_active)
@@ -182,7 +299,8 @@ async function syncBranch(branch, groupableBrands) {
                  category_id   = EXCLUDED.category_id,
                  cost_price    = EXCLUDED.cost_price,
                  last_sync_at  = NOW(),
-                 updated_at    = NOW()`,
+                 updated_at    = NOW()
+           RETURNING id`,
           [
             productName,
             codigos,
@@ -192,16 +310,13 @@ async function syncBranch(branch, groupableBrands) {
             groupInfo.isGrouped,
             currentCategoryId,
             costPrice > 0 ? costPrice : null,
-          ]
-        );
-
-        // Obtener el id interno del producto
-        const productResult = await client.query(
-          "SELECT id FROM products WHERE external_id = $1",
-          [externalId]
+          ],
         );
         const productId = productResult.rows[0]?.id;
-        if (!productId) continue;
+        if (!productId) {
+          await client.query("RELEASE SAVEPOINT sp_product");
+          continue;
+        }
 
         // --- Upsert del stock por sucursal (incluye costos) ---
         if (groupInfo.isGrouped && groupId) {
@@ -236,7 +351,7 @@ async function syncBranch(branch, groupableBrands) {
               groupInfo.displayName,
               costPrice > 0 ? costPrice : null,
               costPrice > 0 ? 1 : 0,
-            ]
+            ],
           );
         } else {
           // Para productos individuales: stock y costo directo
@@ -257,14 +372,21 @@ async function syncBranch(branch, groupableBrands) {
               cleanName,
               costPrice > 0 ? costPrice : null,
               costPrice > 0 ? 1 : 0,
-            ]
+            ],
           );
         }
 
+        await client.query("RELEASE SAVEPOINT sp_product");
         stats.synced++;
       } catch (err) {
+        // Rollback solo de este producto; el resto del lote sigue
+        await client.query("ROLLBACK TO SAVEPOINT sp_product");
+        await client.query("RELEASE SAVEPOINT sp_product");
         stats.errors++;
-        console.error(`Error procesando producto ${raw?.idproducto}:`, err.message);
+        console.error(
+          `Error procesando producto ${raw?.idproducto}:`,
+          err.message,
+        );
       }
     }
 
@@ -276,9 +398,8 @@ async function syncBranch(branch, groupableBrands) {
            stock_status_id = CASE
              WHEN stock_controls.stock_require = 0 THEN 2
              WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) < 70  THEN 1
-             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) <= 100 THEN 2
-             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) <= 150 THEN 3
-             ELSE 4
+             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) <= 120 THEN 2
+             ELSE 3
            END,
            updated_at      = NOW()
        FROM product_stock_by_branch psb,
@@ -287,7 +408,7 @@ async function syncBranch(branch, groupableBrands) {
          AND stock_controls.monthly_control_id = mc.id
          AND mc.branch_id = $1
          AND mc.status = 'draft'`,
-      [branch.id]
+      [branch.id],
     );
 
     await client.query("COMMIT");
@@ -306,34 +427,76 @@ async function syncBranch(branch, groupableBrands) {
  * @returns {Array} Resultados por sucursal
  */
 async function syncAllBranches() {
-  // Obtener marcas agrupables una sola vez
-  const brandsResult = await pool.query(
-    "SELECT id, brand_name FROM brands WHERE is_groupable = true AND is_active = true ORDER BY LENGTH(brand_name) DESC"
-  );
-  const groupableBrands = brandsResult.rows;
+  // Obtener marcas agrupables una sola vez para reutilizar entre sucursales
+  const groupableBrands = await getGroupableBrands();
 
   // Obtener sucursales con códigos de API configurados
   const branchesResult = await pool.query(
-    "SELECT id, name, api_branch_code, api_deposit_code FROM branches WHERE api_branch_code IS NOT NULL AND is_active = true"
+    "SELECT id, name, api_branch_code, api_deposit_code FROM branches WHERE api_branch_code IS NOT NULL AND is_active = true",
   );
   const branches = branchesResult.rows;
 
   if (branches.length === 0) {
-    return { message: "No hay sucursales con código de API configurado", results: [] };
+    return {
+      message: "No hay sucursales con código de API configurado",
+      results: [],
+    };
   }
 
   const results = [];
 
-  for (const branch of branches) {
+  const syncStartTs = Date.now();
+  console.log(
+    `\n========== Sincronización iniciada: ${new Date(syncStartTs).toISOString()} ==========`,
+  );
+  console.log(`Filtro de stock: ${STOCK_FILTER}`);
+  console.log(`Concurrencia: ${SYNC_CONCURRENCY} sucursales en paralelo`);
+  console.log(`Delay entre categorías: ${REQUEST_DELAY_MS}ms`);
+  console.log(`Sucursales a sincronizar: ${branches.length}\n`);
+
+  // Procesa una sucursal y devuelve su resultado (no lanza: captura el error).
+  // Esto permite que Promise.all del lote no se aborte por un fallo aislado.
+  const processBranch = async (branch) => {
+    const branchStartTs = Date.now();
     try {
-      console.log(`Sincronizando sucursal: ${branch.name}...`);
+      console.log(`→ Iniciando: ${branch.name}`);
       const stats = await syncBranch(branch, groupableBrands);
-      results.push({ branch: branch.name, ...stats, status: "ok" });
-      console.log(`✓ ${branch.name}: ${stats.synced} productos, ${stats.grouped} grupos, ${stats.errors} errores`);
+      const branchElapsed = Date.now() - branchStartTs;
+      console.log(
+        `✓ ${branch.name}: ${stats.synced} productos, ${stats.grouped} grupos, ${stats.errors} errores [${formatDuration(branchElapsed)}]`,
+      );
+      return {
+        branch: branch.name,
+        ...stats,
+        status: "ok",
+        elapsed_ms: branchElapsed,
+      };
     } catch (err) {
-      results.push({ branch: branch.name, status: "error", message: err.message });
-      console.error(`✗ Error sincronizando ${branch.name}:`, err.message);
+      const branchElapsed = Date.now() - branchStartTs;
+      console.error(
+        `✗ Error sincronizando ${branch.name} [${formatDuration(branchElapsed)}]:`,
+        err.message,
+      );
+      return {
+        branch: branch.name,
+        status: "error",
+        message: err.message,
+        elapsed_ms: branchElapsed,
+      };
     }
+  };
+
+  // Procesar en lotes de SYNC_CONCURRENCY sucursales a la vez.
+  // Cada lote espera a que todas sus sucursales terminen antes de iniciar el siguiente.
+  for (let i = 0; i < branches.length; i += SYNC_CONCURRENCY) {
+    const batch = branches.slice(i, i + SYNC_CONCURRENCY);
+    const batchNum = Math.floor(i / SYNC_CONCURRENCY) + 1;
+    const totalBatches = Math.ceil(branches.length / SYNC_CONCURRENCY);
+    console.log(
+      `\n--- Lote ${batchNum}/${totalBatches}: ${batch.map((b) => b.name).join(", ")} ---`,
+    );
+    const batchResults = await Promise.all(batch.map(processBranch));
+    results.push(...batchResults);
   }
 
   // Limpiar grupos huérfanos (marcas que pasaron a is_groupable=false).
@@ -347,18 +510,30 @@ async function syncAllBranches() {
      )
      AND id NOT IN (
        SELECT DISTINCT product_stock_id FROM stock_controls
-     )`
+     )`,
   );
 
   // Luego: eliminar grupos que ya no tienen ninguna referencia en product_stock_by_branch
   const deleted = await pool.query(
     `DELETE FROM product_groups
      WHERE id NOT IN (SELECT DISTINCT group_id FROM products WHERE group_id IS NOT NULL)
-       AND id NOT IN (SELECT DISTINCT group_id FROM product_stock_by_branch WHERE group_id IS NOT NULL)`
+       AND id NOT IN (SELECT DISTINCT group_id FROM product_stock_by_branch WHERE group_id IS NOT NULL)`,
   );
   console.log(`✓ Grupos huérfanos eliminados: ${deleted.rowCount}`);
 
-  return { results };
+  const syncEndTs = Date.now();
+  const totalElapsed = syncEndTs - syncStartTs;
+  console.log(
+    `\n========== Sincronización finalizada: ${new Date(syncEndTs).toISOString()} ==========`,
+  );
+  console.log(`Duración total: ${formatDuration(totalElapsed)}\n`);
+
+  return { results, elapsed_ms: totalElapsed };
 }
 
-module.exports = { syncAllBranches, syncBranch, fetchProductsFromApi };
+module.exports = {
+  syncAllBranches,
+  syncBranch,
+  fetchProductsFromApi,
+  getGroupableBrands,
+};

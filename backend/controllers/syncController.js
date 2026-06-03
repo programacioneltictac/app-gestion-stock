@@ -36,12 +36,8 @@ const syncOneBranch = async (req, res) => {
       });
     }
 
-    const brandsResult = await pool.query(
-      "SELECT id, brand_name FROM brands WHERE is_groupable = true AND is_active = true ORDER BY LENGTH(brand_name) DESC"
-    );
-
     console.log(`Sync de sucursal ${branch.name} iniciado por: ${req.user.username}`);
-    const stats = await syncBranch(branch, brandsResult.rows);
+    const stats = await syncBranch(branch);
 
     res.json({
       status: "success",
