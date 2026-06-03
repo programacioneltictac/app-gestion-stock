@@ -1,5 +1,8 @@
 import orderService from '../services/orderService';
 
+export const ORDER_STATUSES = ['pending', 'sent', 'partial', 'completed', 'cancelled'];
+export const ORDER_STATUSES_EDITABLE = ['pending', 'sent', 'partial'];
+
 const ORDER_STATUS_LABELS = {
   pending:   'Pendiente',
   sent:      'Enviado',
@@ -7,6 +10,11 @@ const ORDER_STATUS_LABELS = {
   completed: 'Completado',
   cancelled: 'Cancelado',
 };
+
+export const ORDER_STATUS_OPTIONS = ORDER_STATUSES.map((value) => ({
+  value,
+  label: ORDER_STATUS_LABELS[value],
+}));
 
 export function getOrderStatusLabel(status) {
   return ORDER_STATUS_LABELS[status] || status;

@@ -2,6 +2,7 @@ const Order = require("../models/Order");
 const MonthlyControl = require("../models/MonthlyControl");
 const { canAccessBranch } = require("../middlewares/auth");
 const { handleControllerError } = require("../utils/errorHelper");
+const { ORDER_STATUSES, ORDER_STATUSES_TERMINAL } = require("../utils/orderStatus");
 
 // POST /api/orders/from-control
 // Genera una orden de reposicion a partir de un control completado
@@ -98,11 +99,10 @@ const updateStatus = async (req, res) => {
     const { id } = req.params;
     const { status, notes } = req.body;
 
-    const validStatuses = ["pending", "sent", "partial", "completed", "cancelled"];
-    if (!status || !validStatuses.includes(status)) {
+    if (!status || !ORDER_STATUSES.includes(status)) {
       return res.status(400).json({
         status: "error",
-        message: `Estado invalido. Valores validos: ${validStatuses.join(", ")}`
+        message: `Estado invalido. Valores validos: ${ORDER_STATUSES.join(", ")}`
       });
     }
 
@@ -113,7 +113,7 @@ const updateStatus = async (req, res) => {
     if (!canAccessBranch(req.user, order.branch_id)) {
       return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
     }
-    if (order.status === "completed" || order.status === "cancelled") {
+    if (ORDER_STATUSES_TERMINAL.includes(order.status)) {
       return res.status(400).json({
         status: "error",
         message: "No se puede modificar una orden completada o cancelada"

@@ -8,7 +8,8 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import { DataGrid, GridActionsCellItem, gridClasses } from '@mui/x-data-grid';
+import { DataGrid, GridActionsCellItem } from '@mui/x-data-grid';
+import { dataGridClickableSx, dataGridLoadingSlotProps } from './dataGridStyles';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -16,14 +17,13 @@ import { useNavigate } from 'react-router';
 import { useDialogs } from '../hooks/useDialogs/useDialogs';
 import useNotifications from '../hooks/useNotifications/useNotifications';
 import { useAuth } from '../context/AuthContext';
-import { getOrders, deleteOrder, getOrderStatusLabel, getOrderStatusColor } from '../data/orders';
+import { getOrders, deleteOrder, getOrderStatusLabel, getOrderStatusColor, ORDER_STATUSES } from '../data/orders';
 import { getBranchesList } from '../data/branches';
 import PageContainer from './PageContainer';
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(value);
 
-const ALL_STATUSES = ['pending', 'sent', 'partial', 'completed', 'cancelled'];
 
 export default function OrderList() {
   const navigate = useNavigate();
@@ -189,7 +189,7 @@ export default function OrderList() {
           />
           <Autocomplete
             size="small"
-            options={ALL_STATUSES}
+            options={ORDER_STATUSES}
             getOptionLabel={(s) => getOrderStatusLabel(s)}
             value={filterStatus || null}
             onChange={(_, val) => setFilterStatus(val || '')}
@@ -212,14 +212,8 @@ export default function OrderList() {
             autoHeight
             pageSizeOptions={[10, 25, 50]}
             initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
-            sx={{
-              [`& .${gridClasses.columnHeader}, & .${gridClasses.cell}`]: { outline: 'transparent' },
-              [`& .${gridClasses.columnHeader}:focus-within, & .${gridClasses.cell}:focus-within`]: { outline: 'none' },
-              [`& .${gridClasses.row}:hover`]: { cursor: 'pointer' },
-            }}
-            slotProps={{
-              loadingOverlay: { variant: 'circular-progress', noRowsVariant: 'circular-progress' },
-            }}
+            sx={dataGridClickableSx}
+            slotProps={dataGridLoadingSlotProps}
           />
         </Box>
       )}

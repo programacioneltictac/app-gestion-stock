@@ -10,7 +10,8 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import { DataGrid, gridClasses } from '@mui/x-data-grid';
+import { DataGrid } from '@mui/x-data-grid';
+import { dataGridSx } from './dataGridStyles';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
@@ -25,20 +26,14 @@ import {
   deleteOrder,
   getOrderStatusLabel,
   getOrderStatusColor,
+  ORDER_STATUSES_EDITABLE,
+  ORDER_STATUS_OPTIONS,
 } from '../data/orders';
 import PageContainer from './PageContainer';
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(value);
 
-const EDITABLE_STATUSES = ['pending', 'sent', 'partial'];
-const STATUS_OPTIONS = [
-  { value: 'pending',   label: 'Pendiente' },
-  { value: 'sent',      label: 'Enviado' },
-  { value: 'partial',   label: 'Recibido parcial' },
-  { value: 'completed', label: 'Completado' },
-  { value: 'cancelled', label: 'Cancelado' },
-];
 
 export default function OrderShow() {
   const { orderId } = useParams();
@@ -110,7 +105,7 @@ export default function OrderShow() {
     loadData();
   }, [loadData]);
 
-  const isOrderEditable = order && EDITABLE_STATUSES.includes(order.status);
+  const isOrderEditable = order && ORDER_STATUSES_EDITABLE.includes(order.status);
 
   const handleSaveStatus = React.useCallback(async () => {
     if (!order || newStatus === order.status) return;
@@ -304,9 +299,9 @@ export default function OrderShow() {
         <Stack direction="row" spacing={2} sx={{ mb: 3 }} alignItems="flex-end">
           <Autocomplete
             size="small"
-            options={STATUS_OPTIONS}
+            options={ORDER_STATUS_OPTIONS}
             getOptionLabel={(o) => o.label}
-            value={STATUS_OPTIONS.find((s) => s.value === newStatus) || null}
+            value={ORDER_STATUS_OPTIONS.find((s) => s.value === newStatus) || null}
             onChange={(_, val) => val && setNewStatus(val.value)}
             isOptionEqualToValue={(o, v) => o.value === v.value}
             disableClearable
@@ -340,10 +335,7 @@ export default function OrderShow() {
           autoHeight
           pageSizeOptions={[25, 50, 100]}
           initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
-          sx={{
-            [`& .${gridClasses.columnHeader}, & .${gridClasses.cell}`]: { outline: 'transparent' },
-            [`& .${gridClasses.columnHeader}:focus-within, & .${gridClasses.cell}:focus-within`]: { outline: 'none' },
-          }}
+          sx={dataGridSx}
         />
       </Box>
 
