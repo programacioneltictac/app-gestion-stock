@@ -5,31 +5,37 @@ const { handleControllerError } = require("../utils/errorHelper");
 const { ORDER_STATUSES, ORDER_STATUSES_TERMINAL } = require("../utils/orderStatus");
 
 // POST /api/orders/from-control
-// Genera una orden de reposicion a partir de un control completado
+// Genera una orden de reposicion con los items seleccionados de un control.
+// El control puede estar draft o completed; los items elegidos quedan marcados
+// como pedidos para no volver a enviarse a otra orden.
 const createFromControl = async (req, res) => {
   try {
-    const { monthly_control_id } = req.body;
+    const { monthly_control_id, stock_control_ids } = req.body;
     if (!monthly_control_id) {
       return res.status(400).json({ status: "error", message: "monthly_control_id es requerido" });
+    }
+    if (!Array.isArray(stock_control_ids) || stock_control_ids.length === 0) {
+      return res.status(400).json({ status: "error", message: "Debe seleccionar al menos un item" });
     }
 
     const control = await MonthlyControl.findById(monthly_control_id);
     if (!control) {
       return res.status(404).json({ status: "error", message: "Control no encontrado" });
     }
-    if (control.status !== "completed") {
-      return res.status(400).json({ status: "error", message: "Solo se pueden generar ordenes de controles completados" });
+    if (control.status !== "draft" && control.status !== "completed") {
+      return res.status(400).json({ status: "error", message: "Solo se pueden generar ordenes de controles en gestion o completados" });
     }
     if (!canAccessBranch(req.user, control.branch_id)) {
       return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
     }
 
-    const { order, itemCount } = await Order.createFromControl(monthly_control_id, req.user.id);
+    const ids = stock_control_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    const { order, itemCount } = await Order.createFromControl(monthly_control_id, req.user.id, ids);
 
     if (itemCount === 0) {
       return res.status(400).json({
         status: "error",
-        message: "El control no tiene items con estado generar_pedido"
+        message: "Ninguno de los items seleccionados es pedible (ya pedidos o sin estado generar_pedido)"
       });
     }
 

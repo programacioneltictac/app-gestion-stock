@@ -67,6 +67,10 @@ export default function StockControlShow() {
   const [stockRequire, setStockRequire] = React.useState("");
   const [isSaving, setIsSaving] = React.useState(false);
 
+  // Selección de ítems para generar orden parcial
+  const [selectionModel, setSelectionModel] = React.useState([]);
+  const [isGenerating, setIsGenerating] = React.useState(false);
+
   const loadData = React.useCallback(async () => {
     setError(null);
     setIsLoading(true);
@@ -145,20 +149,37 @@ export default function StockControlShow() {
   );
 
   const handleGenerateOrder = React.useCallback(async () => {
+    if (selectionModel.length === 0) return;
+    setIsGenerating(true);
     try {
-      const order = await createOrderFromControl(Number(controlId));
-      notifications.show('Orden de reposicion creada exitosamente', {
+      const order = await createOrderFromControl(Number(controlId), selectionModel.map(Number));
+      notifications.show(`Orden de reposición creada con ${selectionModel.length} ítem(s)`, {
         severity: 'success',
-        autoHideDuration: 3000,
+        autoHideDuration: 4000,
+        actionText: 'Ver orden',
+        onAction: () => navigate(`/orders/${order.id}`),
       });
-      navigate(`/orders/${order.id}`);
+      setSelectionModel([]);
+      // El control sigue abierto; recargamos para marcar los ítems ya pedidos.
+      loadData();
     } catch (err) {
       notifications.show(`Error al crear orden: ${err.message}`, {
         severity: 'error',
         autoHideDuration: 5000,
       });
     }
-  }, [controlId, navigate, notifications]);
+    setIsGenerating(false);
+  }, [controlId, selectionModel, navigate, notifications, loadData]);
+
+  // Ítems pedibles: estado generar_pedido (1) y aún no enviados a una orden.
+  const orderableIds = React.useMemo(
+    () => items.filter((i) => i.stockStatusId === 1 && !i.orderDetailId).map((i) => i.id),
+    [items]
+  );
+
+  const handleSelectAllOrderable = React.useCallback(() => {
+    setSelectionModel(orderableIds);
+  }, [orderableIds]);
 
   const handleCompleteControl = React.useCallback(async () => {
     const confirmed = await dialogs.confirm(
@@ -217,13 +238,20 @@ export default function StockControlShow() {
       {
         field: "stockStatusName",
         headerName: "Estado",
-        width: 140,
+        width: 180,
         renderCell: ({ value, row }) => (
-          <Chip
-            label={value}
-            color={STOCK_STATUS_COLOR[row.stockStatusId] || "default"}
-            size="small"
-          />
+          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ height: "100%" }}>
+            <Chip
+              label={value}
+              color={STOCK_STATUS_COLOR[row.stockStatusId] || "default"}
+              size="small"
+            />
+            {row.orderDetailId && (
+              <Tooltip title="Ya enviado a una orden de reposición">
+                <Chip label="Pedido" color="info" size="small" variant="outlined" />
+              </Tooltip>
+            )}
+          </Stack>
         ),
       },
       {
@@ -285,14 +313,23 @@ export default function StockControlShow() {
               Completar
             </Button>
           )}
-          {control?.status === "completed" && stats.needOrder > 0 && (
+          {control && orderableIds.length > 0 && (
             <Button
-              variant="outlined"
+              variant="contained"
               color="warning"
               onClick={handleGenerateOrder}
-              startIcon={<ShoppingCartIcon />}
+              disabled={selectionModel.length === 0 || isGenerating}
+              startIcon={
+                isGenerating ? (
+                  <CircularProgress size={16} color="inherit" />
+                ) : (
+                  <ShoppingCartIcon />
+                )
+              }
             >
-              Generar orden ({stats.needOrder})
+              {isGenerating
+                ? "Generando..."
+                : `Generar orden (${selectionModel.length})`}
             </Button>
           )}
         </Stack>
@@ -366,6 +403,25 @@ export default function StockControlShow() {
         </Stack>
       )}
 
+      {/* Barra de selección para órdenes parciales */}
+      {control && orderableIds.length > 0 && (
+        <Stack direction="row" spacing={1} sx={{ mb: 1 }} alignItems="center">
+          <Typography variant="body2" color="text.secondary">
+            {selectionModel.length > 0
+              ? `${selectionModel.length} ítem(s) seleccionado(s) para pedir`
+              : `${orderableIds.length} ítem(s) pendiente(s) de pedir`}
+          </Typography>
+          <Button size="small" onClick={handleSelectAllOrderable}>
+            Seleccionar todos los pendientes
+          </Button>
+          {selectionModel.length > 0 && (
+            <Button size="small" color="inherit" onClick={() => setSelectionModel([])}>
+              Limpiar selección
+            </Button>
+          )}
+        </Stack>
+      )}
+
       {error ? (
         <Alert severity="error">{error.message}</Alert>
       ) : (
@@ -373,7 +429,11 @@ export default function StockControlShow() {
           <DataGrid
             rows={items}
             columns={columns}
+            checkboxSelection
             disableRowSelectionOnClick
+            isRowSelectable={({ row }) => row.stockStatusId === 1 && !row.orderDetailId}
+            rowSelectionModel={selectionModel}
+            onRowSelectionModelChange={(model) => setSelectionModel(model)}
             loading={isLoading}
             autoHeight
             pageSizeOptions={[25, 50, 100]}

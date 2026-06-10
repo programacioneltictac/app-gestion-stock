@@ -7,23 +7,34 @@ class Order {
   // ============================================================
 
   /**
-   * Crea una orden de reposicion a partir de un control completado.
-   * Copia automaticamente los items con estado generar_pedido.
+   * Crea una orden de reposicion a partir de un control (draft o completed).
+   * Copia SOLO los items seleccionados que esten en estado generar_pedido
+   * (stock_status_id = 1) y que no hayan sido pedidos antes (order_detail_id
+   * IS NULL). Tras copiarlos, los marca como pedidos en stock_controls para
+   * que no puedan volver a enviarse a otra orden.
+   *
+   * @param {number}   monthlyControlId
+   * @param {number}   createdBy
+   * @param {number[]} stockControlIds  ids de stock_controls seleccionados.
    */
-  static async createFromControl(monthlyControlId, createdBy) {
+  static async createFromControl(monthlyControlId, createdBy, stockControlIds) {
+    if (!Array.isArray(stockControlIds) || stockControlIds.length === 0) {
+      throw new Error("Debe seleccionar al menos un item para generar la orden");
+    }
+
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
 
-      // Obtener datos del control origen
+      // Obtener datos del control origen (draft o completed, no cancelado/borrado)
       const controlResult = await client.query(
         `SELECT mc.id, mc.branch_id, mc.control_year, mc.control_month
          FROM monthly_controls mc
-         WHERE mc.id = $1 AND mc.status = 'completed'`,
+         WHERE mc.id = $1 AND mc.status IN ('draft', 'completed')`,
         [monthlyControlId]
       );
       const control = controlResult.rows[0];
-      if (!control) throw new Error("Control no encontrado o no esta completado");
+      if (!control) throw new Error("Control no encontrado");
 
       // Crear la orden
       const orderResult = await client.query(
@@ -35,8 +46,10 @@ class Order {
       );
       const order = orderResult.rows[0];
 
-      // Copiar items con estado generar_pedido (stock_status_id = 1)
-      // unit_cost y cost_estimate se toman de avg_cost en product_stock_by_branch
+      // Copiar los items SELECCIONADOS que sigan en estado generar_pedido (1)
+      // y que no hayan sido pedidos ya (order_detail_id IS NULL).
+      // unit_cost y cost_estimate se toman de avg_cost en product_stock_by_branch.
+      // Devolvemos tambien stock_control_id para luego marcar el item como pedido.
       const itemsResult = await client.query(
         `INSERT INTO order_details
            (order_control_id, stock_control_id, product_stock_id, display_name,
@@ -53,9 +66,30 @@ class Order {
          FROM stock_controls sc
          JOIN product_stock_by_branch psb ON sc.product_stock_id = psb.id
          WHERE sc.monthly_control_id = $2
+           AND sc.id = ANY($3::int[])
            AND sc.stock_status_id = 1
-         RETURNING id`,
-        [order.id, monthlyControlId]
+           AND sc.order_detail_id IS NULL
+         RETURNING id, stock_control_id`,
+        [order.id, monthlyControlId, stockControlIds]
+      );
+
+      // Si ningun item seleccionado resulto pedible, no dejar una orden vacia.
+      if (itemsResult.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return { order: null, itemCount: 0 };
+      }
+
+      // Marcar como pedidos los items copiados, ligando cada stock_control con
+      // la linea de orden que se acaba de crear para el (od.stock_control_id).
+      await client.query(
+        `UPDATE stock_controls sc
+         SET ordered_at      = NOW(),
+             order_detail_id = od.id,
+             updated_at      = NOW()
+         FROM order_details od
+         WHERE od.order_control_id = $1
+           AND od.stock_control_id = sc.id`,
+        [order.id]
       );
 
       // Calcular y guardar costo estimado total de la orden

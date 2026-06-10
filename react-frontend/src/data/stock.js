@@ -50,6 +50,8 @@ function transformStockItemFromBackend(item) {
     stockStatusName: item.stock_status_name,
     notes: item.notes || "",
     updatedAt: item.updated_at,
+    orderedAt: item.ordered_at || null,
+    orderDetailId: item.order_detail_id || null,
   };
 }
 

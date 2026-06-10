@@ -89,8 +89,8 @@ export async function getOrderDetail(orderId) {
   };
 }
 
-export async function createOrderFromControl(monthlyControlId) {
-  const data = await orderService.createFromControl(monthlyControlId);
+export async function createOrderFromControl(monthlyControlId, stockControlIds) {
+  const data = await orderService.createFromControl(monthlyControlId, stockControlIds);
   return transformOrderFromBackend(data.order);
 }
 

@@ -1,8 +1,11 @@
 import apiClient from './apiClient';
 
 class OrderService {
-  async createFromControl(monthlyControlId) {
-    return apiClient.post('/orders/from-control', { monthly_control_id: monthlyControlId });
+  async createFromControl(monthlyControlId, stockControlIds) {
+    return apiClient.post('/orders/from-control', {
+      monthly_control_id: monthlyControlId,
+      stock_control_ids: stockControlIds,
+    });
   }
 
   async getOrders(branchId = null, limit = 50) {
