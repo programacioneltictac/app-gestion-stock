@@ -89,7 +89,13 @@ async function fetchProductsFromApi(
       }
 
       if (!Array.isArray(response.data)) {
-        throw new Error("La API no devolvió un array de productos");
+        // La API a veces, ante un hipo puntual, responde algo que no es un array
+        // ni trae `hayerror` (objeto vacío, "", HTML de error). Es intermitente
+        // (misma familia que "incorrect header check"), así que lo marcamos como
+        // transitorio para que se reintente en vez de perder la categoría.
+        const err = new Error("La API no devolvió un array de productos");
+        err.code = "NON_ARRAY_RESPONSE";
+        throw err;
       }
 
       return response.data;
@@ -101,6 +107,7 @@ async function fetchProductsFromApi(
         err.code === "ETIMEDOUT" ||
         err.code === "Z_DATA_ERROR" || // descompresión: respuesta corrupta
         err.code === "Z_BUF_ERROR" ||
+        err.code === "NON_ARRAY_RESPONSE" || // respuesta no-array sin hayerror
         /incorrect header check/i.test(err.message || "") ||
         (err.response && err.response.status >= 500);
 
