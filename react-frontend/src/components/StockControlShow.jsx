@@ -33,6 +33,20 @@ import PageContainer from "./PageContainer";
 
 const STOCK_STATUS_COLOR = { 1: "error", 2: "success", 3: "warning", 4: "warning" };
 
+// Formatea un ISO timestamp a "dd/mm/aaaa hh:mm" en hora local.
+function formatSyncDate(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function StockControlShow() {
   const { branchId, controlId } = useParams();
   const navigate = useNavigate();
@@ -41,6 +55,7 @@ export default function StockControlShow() {
 
   const [control, setControl] = React.useState(null);
   const [items, setItems] = React.useState([]);
+  const [lastSyncAt, setLastSyncAt] = React.useState(null);
   const [availableProducts, setAvailableProducts] = React.useState([]);
   const [conditions, setConditions] = React.useState([]);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -63,7 +78,8 @@ export default function StockControlShow() {
         getConditions(),
       ]);
       setControl(currentData);
-      setItems(itemsData);
+      setItems(itemsData.items);
+      setLastSyncAt(itemsData.lastSyncAt);
       setAvailableProducts(productsData);
       setConditions(conditionsData);
     } catch (loadError) {
@@ -88,7 +104,8 @@ export default function StockControlShow() {
       await upsertStockItem(Number(controlId), selectedProduct.id, Number(stockRequire), selectedCondition || null);
       // Reload items only (products list stays)
       const itemsData = await getStockItems(Number(controlId));
-      setItems(itemsData);
+      setItems(itemsData.items);
+      setLastSyncAt(itemsData.lastSyncAt);
       setSelectedProduct(null);
       setSelectedCondition("");
       setStockRequire("");
@@ -294,6 +311,11 @@ export default function StockControlShow() {
           <Typography variant="body2" color="success.main">Óptimo: <strong>{stats.optimal}</strong></Typography>
           <Typography variant="body2" color="warning.main">Sobrestock: <strong>{stats.excess}</strong></Typography>
           <Typography variant="body2">Compliance: <strong>{stats.avg.toFixed(1)}%</strong></Typography>
+          {formatSyncDate(lastSyncAt) && (
+            <Typography variant="body2" color="text.secondary" sx={{ ml: "auto" }}>
+              Última sync: <strong>{formatSyncDate(lastSyncAt)}</strong>
+            </Typography>
+          )}
         </Stack>
       )}
 

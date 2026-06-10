@@ -147,7 +147,20 @@ const getStockItems = async (req, res) => {
     }
 
     const items = await StockControl.findByControlId(control_id);
-    res.json({ status: "success", items, control: { id: control.id, branch_id: control.branch_id, status: control.status } });
+    // Fecha de última sincronización del control: el máximo last_sync_at de sus ítems.
+    // Todos los ítems de una sucursal se sincronizan juntos, así que en la práctica
+    // representa cuándo se actualizó por última vez el stock de este control.
+    const lastSyncAt = items.reduce((max, it) => {
+      if (!it.last_sync_at) return max;
+      const t = new Date(it.last_sync_at).getTime();
+      return t > max ? t : max;
+    }, 0);
+    res.json({
+      status: "success",
+      items,
+      last_sync_at: lastSyncAt > 0 ? new Date(lastSyncAt).toISOString() : null,
+      control: { id: control.id, branch_id: control.branch_id, status: control.status },
+    });
   } catch (error) {
     handleControllerError(res, error, "Error obteniendo ítems:");
   }

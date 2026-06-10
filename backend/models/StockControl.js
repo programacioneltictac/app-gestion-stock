@@ -84,7 +84,8 @@ class StockControl {
          sc.condition_id,
          co.condition_name,
          sc.notes,
-         sc.updated_at
+         sc.updated_at,
+         psb.last_sync_at
        FROM stock_controls sc
        JOIN product_stock_by_branch psb ON sc.product_stock_id = psb.id
        LEFT JOIN products p      ON psb.product_id = p.id

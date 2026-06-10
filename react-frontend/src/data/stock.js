@@ -85,7 +85,10 @@ export async function deleteMonthlyControl(controlId) {
 
 export async function getStockItems(controlId) {
   const data = await stockService.getItems(controlId);
-  return (data.items || []).map(transformStockItemFromBackend);
+  return {
+    items: (data.items || []).map(transformStockItemFromBackend),
+    lastSyncAt: data.last_sync_at || null,
+  };
 }
 
 export async function upsertStockItem(monthlyControlId, productStockId, stockRequire, conditionId = null) {
