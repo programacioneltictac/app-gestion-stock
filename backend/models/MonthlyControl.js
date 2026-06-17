@@ -1,12 +1,16 @@
 const { pool } = require("../database/config");
 
 class MonthlyControl {
-  static async create(branch_id, year, month, created_by) {
+  // Control abierto por rubro (no atado al mes). category_id es obligatorio.
+  // control_year/control_month se conservan (los llena el controlador desde la
+  // fecha de apertura) para no romper Order.createFromControl, getHistory y la
+  // vista v_monthly_control_summary.
+  static async create(branch_id, category_id, year, month, created_by) {
     const result = await pool.query(
-      `INSERT INTO monthly_controls (branch_id, control_year, control_month, created_by, status)
-       VALUES ($1, $2, $3, $4, 'draft')
-       RETURNING id, branch_id, control_year, control_month, control_date, status`,
-      [branch_id, year, month, created_by]
+      `INSERT INTO monthly_controls (branch_id, category_id, control_year, control_month, created_by, status)
+       VALUES ($1, $2, $3, $4, $5, 'draft')
+       RETURNING id, branch_id, category_id, control_year, control_month, control_date, status`,
+      [branch_id, category_id, year, month, created_by]
     );
     return result.rows[0];
   }
@@ -14,9 +18,11 @@ class MonthlyControl {
   static async findById(id) {
     const result = await pool.query(
       `SELECT mc.*, b.name as branch_name, b.code as branch_code,
+              c.category_name,
               u.username as created_by_username
        FROM monthly_controls mc
        LEFT JOIN branches b ON mc.branch_id = b.id
+       LEFT JOIN categories c ON mc.category_id = c.id
        LEFT JOIN users u ON mc.created_by = u.id
        WHERE mc.id = $1`,
       [id]
@@ -24,25 +30,34 @@ class MonthlyControl {
     return result.rows[0] || null;
   }
 
-  static async findByBranchAndPeriod(branch_id, year, month) {
+  // ¿Hay un control 'draft' de este rubro en esta sucursal? (unicidad por rubro activo).
+  static async existsOpenForCategory(branch_id, category_id) {
     const result = await pool.query(
-      `SELECT mc.*, b.name as branch_name, b.code as branch_code,
-              u.username as created_by_username
-       FROM monthly_controls mc
-       LEFT JOIN branches b ON mc.branch_id = b.id
-       LEFT JOIN users u ON mc.created_by = u.id
-       WHERE mc.branch_id = $1 AND mc.control_year = $2 AND mc.control_month = $3`,
-      [branch_id, year, month]
+      "SELECT id FROM monthly_controls WHERE branch_id = $1 AND category_id = $2 AND status = 'draft'",
+      [branch_id, category_id]
     );
     return result.rows[0] || null;
   }
 
-  static async exists(branch_id, year, month) {
+  // Lista los controles abiertos (draft) de una sucursal — reemplaza al
+  // "control actual" único. Incluye conteo de ítems para la pantalla de entrada.
+  static async findOpenByBranch(branch_id) {
     const result = await pool.query(
-      "SELECT id FROM monthly_controls WHERE branch_id = $1 AND control_year = $2 AND control_month = $3",
-      [branch_id, year, month]
+      `SELECT mc.*, b.name as branch_name, b.code as branch_code,
+              c.category_name,
+              u.username as created_by_username,
+              COUNT(sc.id) AS total_items
+       FROM monthly_controls mc
+       LEFT JOIN branches b ON mc.branch_id = b.id
+       LEFT JOIN categories c ON mc.category_id = c.id
+       LEFT JOIN users u ON mc.created_by = u.id
+       LEFT JOIN stock_controls sc ON mc.id = sc.monthly_control_id
+       WHERE mc.branch_id = $1 AND mc.status = 'draft'
+       GROUP BY mc.id, b.name, b.code, c.category_name, u.username
+       ORDER BY mc.control_date DESC, mc.id DESC`,
+      [branch_id]
     );
-    return result.rows.length > 0;
+    return result.rows;
   }
 
   static async update(id, notes) {
@@ -66,6 +81,7 @@ class MonthlyControl {
   static async getHistory(branch_id, limit = 12) {
     const result = await pool.query(
       `SELECT mc.*, b.name as branch_name, b.code as branch_code,
+              c.category_name,
               u.username as created_by_username,
               COUNT(sc.id) as total_items,
               COUNT(CASE WHEN sc.stock_status_id = 1 THEN 1 END) as need_order_items,
@@ -80,12 +96,13 @@ class MonthlyControl {
               ), 2) as avg_compliance
        FROM monthly_controls mc
        LEFT JOIN branches b ON mc.branch_id = b.id
+       LEFT JOIN categories c ON mc.category_id = c.id
        LEFT JOIN users u ON mc.created_by = u.id
        LEFT JOIN stock_controls sc ON mc.id = sc.monthly_control_id
        LEFT JOIN stock_status ss ON sc.stock_status_id = ss.id
        WHERE mc.branch_id = $1
-       GROUP BY mc.id, b.name, b.code, u.username
-       ORDER BY mc.control_year DESC, mc.control_month DESC
+       GROUP BY mc.id, b.name, b.code, c.category_name, u.username
+       ORDER BY mc.control_date DESC, mc.id DESC
        LIMIT $2`,
       [branch_id, parseInt(limit)]
     );
