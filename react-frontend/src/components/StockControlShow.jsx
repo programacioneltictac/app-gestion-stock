@@ -26,7 +26,7 @@ import {
   completeMonthlyControl,
   getAvailableProducts,
   getConditions,
-  getCurrentControl,
+  getControlById,
 } from "../data/stock";
 import { createOrderFromControl } from "../data/orders";
 import PageContainer from "./PageContainer";
@@ -75,13 +75,16 @@ export default function StockControlShow() {
     setError(null);
     setIsLoading(true);
     try {
-      const [currentData, itemsData, productsData, conditionsData] = await Promise.all([
-        getCurrentControl(Number(branchId)),
+      // El control trae su rubro (categoryId), necesario para filtrar el catálogo.
+      const controlData = await getControlById(Number(controlId));
+      if (!controlData) throw new Error("Control no encontrado");
+
+      const [itemsData, productsData, conditionsData] = await Promise.all([
         getStockItems(Number(controlId)),
-        getAvailableProducts(Number(branchId)),
+        getAvailableProducts(Number(branchId), controlData.categoryId),
         getConditions(),
       ]);
-      setControl(currentData);
+      setControl(controlData);
       setItems(itemsData.items);
       setLastSyncAt(itemsData.lastSyncAt);
       setAvailableProducts(productsData);
@@ -105,11 +108,16 @@ export default function StockControlShow() {
 
     setIsSaving(true);
     try {
-      await upsertStockItem(Number(controlId), selectedProduct.id, Number(stockRequire), selectedCondition || null);
-      // Reload items only (products list stays)
-      const itemsData = await getStockItems(Number(controlId));
+      await upsertStockItem(Number(controlId), selectedProduct.ref, Number(stockRequire), selectedCondition || null);
+      // Si era un producto del catálogo global, ahora ya existe en la sucursal:
+      // recargamos el catálogo para que pase a la lista local.
+      const [itemsData, productsData] = await Promise.all([
+        getStockItems(Number(controlId)),
+        selectedProduct.isGlobal ? getAvailableProducts(Number(branchId), control.categoryId) : Promise.resolve(null),
+      ]);
       setItems(itemsData.items);
       setLastSyncAt(itemsData.lastSyncAt);
+      if (productsData) setAvailableProducts(productsData);
       setSelectedProduct(null);
       setSelectedCondition("");
       setStockRequire("");
@@ -120,7 +128,7 @@ export default function StockControlShow() {
       });
     }
     setIsSaving(false);
-  }, [selectedProduct, stockRequire, controlId, notifications]);
+  }, [selectedProduct, stockRequire, selectedCondition, controlId, branchId, control, notifications]);
 
   const handleDeleteItem = React.useCallback(
     (item) => async () => {
@@ -290,11 +298,11 @@ export default function StockControlShow() {
 
   return (
     <PageContainer
-      title={control ? `${control.branchName} - ${control.period}` : "Control de Stock"}
+      title={control ? `${control.branchName} - ${control.categoryName}` : "Control de Stock"}
       breadcrumbs={[
         { title: "Control de Stock", href: `/stock-control/${branchId}` },
         { title: control?.branchName || "Sucursal" },
-        { title: control?.period || "Cargando..." },
+        { title: control?.categoryName || "Cargando..." },
       ]}
       actions={
         <Stack direction="row" alignItems="center" spacing={1}>
@@ -362,14 +370,26 @@ export default function StockControlShow() {
           <Autocomplete
             size="small"
             options={availableProducts}
-            getOptionLabel={(o) => o.display_name || ""}
+            getOptionLabel={(o) => o.displayName || ""}
             value={selectedProduct}
             onChange={(_, val) => setSelectedProduct(val)}
-            isOptionEqualToValue={(o, v) => o.id === v.id}
+            isOptionEqualToValue={(o, v) => o.key === v.key}
+            renderOption={(props, option) => (
+              <Box component="li" {...props} key={option.key}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
+                  <Typography variant="body2" sx={{ flex: 1 }}>
+                    {option.displayName}
+                  </Typography>
+                  {option.isGlobal && (
+                    <Chip label="sin stock" size="small" variant="outlined" color="default" />
+                  )}
+                </Box>
+              </Box>
+            )}
             renderInput={(params) => (
               <TextField {...params} label="Producto" placeholder="Buscar producto..." />
             )}
-            sx={{ minWidth: 300 }}
+            sx={{ minWidth: 340 }}
           />
           <Autocomplete
             size="small"

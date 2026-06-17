@@ -11,12 +11,17 @@ class StockService {
     return apiClient.get(`/stock/monthly-control/current${params}`);
   }
 
+  async getControlById(controlId) {
+    return apiClient.get(`/stock/monthly-control/${controlId}`);
+  }
+
   async completeControl(controlId) {
     return apiClient.put('/stock/monthly-control/complete', { control_id: controlId });
   }
 
   async getControlHistory(branchId) {
-    const params = branchId ? `?branch_id=${branchId}` : '';
+    // Límite amplio: la grilla muestra abiertos (draft) + historial en una sola lista.
+    const params = branchId ? `?branch_id=${branchId}&limit=200` : '?limit=200';
     return apiClient.get(`/stock/monthly-control/history${params}`);
   }
 
@@ -37,9 +42,15 @@ class StockService {
     return apiClient.delete(`/stock/items/${itemId}`);
   }
 
-  // Available products for a branch
-  async getAvailableProducts(branchId) {
-    return apiClient.get(`/stock/available-products/${branchId}`);
+  // Available products for a branch, filtered by the control's category (rubro)
+  async getAvailableProducts(branchId, categoryId) {
+    return apiClient.get(`/stock/available-products/${branchId}?category_id=${categoryId}`);
+  }
+
+  // Productos/grupos del sistema que aún no existen en esta sucursal (stock 0),
+  // filtrados por el rubro del control.
+  async getGlobalCatalog(branchId, categoryId) {
+    return apiClient.get(`/stock/global-catalog/${branchId}?category_id=${categoryId}`);
   }
 
   async getConditions() {

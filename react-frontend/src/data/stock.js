@@ -18,6 +18,8 @@ function transformControlFromBackend(control) {
     id: control.id,
     branchId: control.branch_id,
     branchName: control.branch_name,
+    categoryId: control.category_id,
+    categoryName: control.category_name || "",
     period,
     status: control.status,
     statusName,
@@ -57,8 +59,16 @@ function transformStockItemFromBackend(item) {
 
 // ============= MONTHLY CONTROLS =============
 
-export async function getCurrentControl(branchId) {
+// Lista de controles ABIERTOS (draft) de la sucursal — uno por rubro.
+// ⚠️ Reemplaza al antiguo getCurrentControl que devolvía un único control.
+export async function getOpenControls(branchId) {
   const data = await stockService.getCurrentControl(branchId);
+  return (data.controls || []).map(transformControlFromBackend);
+}
+
+// Detalle de un control por su id (para la pantalla de detalle).
+export async function getControlById(controlId) {
+  const data = await stockService.getControlById(controlId);
   if (!data.control) return null;
   return transformControlFromBackend(data.control);
 }
@@ -68,8 +78,9 @@ export async function getControlHistory(branchId) {
   return (data.history || data.controls || []).map(transformControlFromBackend);
 }
 
-export async function createMonthlyControl(branchId) {
-  const data = await stockService.createMonthlyControl({ branch_id: branchId });
+// Crea un control abierto del rubro indicado (category_id obligatorio).
+export async function createMonthlyControl(branchId, categoryId) {
+  const data = await stockService.createMonthlyControl({ branch_id: branchId, category_id: categoryId });
   return transformControlFromBackend(data.control);
 }
 
@@ -93,10 +104,15 @@ export async function getStockItems(controlId) {
   };
 }
 
-export async function upsertStockItem(monthlyControlId, productStockId, stockRequire, conditionId = null) {
+// Agrega/actualiza un ítem del control. `ref` identifica el producto:
+//   { productStockId } → producto ya presente en la sucursal
+//   { productId } | { groupId } → catálogo global; el backend crea la fila en 0
+export async function upsertStockItem(monthlyControlId, ref, stockRequire, conditionId = null) {
   const data = await stockService.upsertItem({
     monthly_control_id: monthlyControlId,
-    product_stock_id: productStockId,
+    product_stock_id: ref.productStockId || null,
+    product_id: ref.productId || null,
+    group_id: ref.groupId || null,
     stock_require: stockRequire,
     condition_id: conditionId,
   });
@@ -110,9 +126,35 @@ export async function deleteStockItem(itemId) {
 
 // ============= AVAILABLE PRODUCTS =============
 
-export async function getAvailableProducts(branchId) {
-  const data = await stockService.getAvailableProducts(branchId);
-  return data.products || [];
+// Catálogo unificado para agregar ítems al control:
+// - productos presentes en la sucursal (con product_stock_id / stock real)
+// - productos y grupos del sistema NO presentes (isGlobal: se crean en 0 al elegirlos)
+// Cada opción lleva una `ref` lista para upsertStockItem.
+export async function getAvailableProducts(branchId, categoryId) {
+  const [available, global] = await Promise.all([
+    stockService.getAvailableProducts(branchId, categoryId),
+    stockService.getGlobalCatalog(branchId, categoryId),
+  ]);
+
+  const local = (available.products || []).map((p) => ({
+    key: `s-${p.id}`,
+    id: p.id, // product_stock_id
+    displayName: p.display_name || "",
+    stock: p.stock,
+    isGlobal: false,
+    ref: { productStockId: p.id },
+  }));
+
+  const globalOpts = (global.products || []).map((p) => ({
+    key: p.product_id ? `p-${p.product_id}` : `g-${p.group_id}`,
+    id: null,
+    displayName: p.display_name || "",
+    categoryName: p.category_name || "",
+    isGlobal: true,
+    ref: p.product_id ? { productId: p.product_id } : { groupId: p.group_id },
+  }));
+
+  return [...local, ...globalOpts];
 }
 
 export async function getConditions() {
