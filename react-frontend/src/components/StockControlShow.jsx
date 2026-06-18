@@ -33,6 +33,14 @@ import PageContainer from "./PageContainer";
 
 const STOCK_STATUS_COLOR = { 1: "error", 2: "success", 3: "warning", 4: "warning" };
 
+// Etiqueta de la píldora "ya pedido" según el destino de la orden.
+const ORDER_DEST_LABELS = {
+  hub:      { label: "Pedido a Hub",          color: "info",      tooltip: "Pedido al Nodo Hub (orden interna)" },
+  external: { label: "Pedido a proveedor",    color: "secondary", tooltip: "Pedido a proveedor (orden externa)" },
+  both:     { label: "Pedido (Hub+proveedor)", color: "primary",  tooltip: "Pedido parcial al Hub y el resto a proveedor" },
+  default:  { label: "Pedido",                color: "info",      tooltip: "Ya enviado a una orden de reposición" },
+};
+
 // Formatea un ISO timestamp a "dd/mm/aaaa hh:mm" en hora local.
 function formatSyncDate(iso) {
   if (!iso) return null;
@@ -160,12 +168,23 @@ export default function StockControlShow() {
     if (selectionModel.length === 0) return;
     setIsGenerating(true);
     try {
-      const order = await createOrderFromControl(Number(controlId), selectionModel.map(Number));
-      notifications.show(`Orden de reposición creada con ${selectionModel.length} ítem(s)`, {
+      const orders = await createOrderFromControl(Number(controlId), selectionModel.map(Number));
+      // Con Nodo Hub pueden volver 2 órdenes (interna al Hub + externa al proveedor).
+      const internal = orders.find((o) => o.isInternal);
+      const external = orders.find((o) => !o.isInternal);
+      const parts = [];
+      if (internal) parts.push('interna (Hub)');
+      if (external) parts.push('externa (proveedor)');
+      const msg = orders.length > 1
+        ? `Se generaron ${orders.length} órdenes [${parts.join(' + ')}] con ${selectionModel.length} ítem(s)`
+        : `Orden ${parts[0] || ''} creada con ${selectionModel.length} ítem(s)`;
+      // Acción "Ver orden": preferimos la externa (la que va al proveedor); si no, la interna.
+      const target = external || internal || orders[0];
+      notifications.show(msg, {
         severity: 'success',
         autoHideDuration: 4000,
-        actionText: 'Ver orden',
-        onAction: () => navigate(`/orders/${order.id}`),
+        actionText: target ? 'Ver orden' : undefined,
+        onAction: target ? () => navigate(`/orders/${target.id}`) : undefined,
       });
       setSelectionModel([]);
       // El control sigue abierto; recargamos para marcar los ítems ya pedidos.
@@ -181,7 +200,7 @@ export default function StockControlShow() {
 
   // Ítems pedibles: estado generar_pedido (1) y aún no enviados a una orden.
   const orderableIds = React.useMemo(
-    () => items.filter((i) => i.stockStatusId === 1 && !i.orderDetailId).map((i) => i.id),
+    () => items.filter((i) => i.stockStatusId === 1 && !i.orderedAt).map((i) => i.id),
     [items]
   );
 
@@ -223,11 +242,32 @@ export default function StockControlShow() {
       { field: "conditionName", headerName: "Condición", width: 130 },
       { field: "stockRequire", headerName: "Req.", width: 80, type: "number" },
       { field: "stockCurrent", headerName: "Actual", width: 80, type: "number" },
+      // Solo en el control del Hub: unidades reservadas por órdenes internas
+      // abiertas de otras sucursales (no mueve stock, es estado derivado).
+      ...(control?.isHub
+        ? [{
+            field: "committed",
+            headerName: "Comprom.",
+            width: 100,
+            type: "number",
+            renderCell: ({ value }) => (
+              <Box sx={{ display: "flex", alignItems: "center", height: "100%" }}>
+                <Typography sx={{ color: value > 0 ? "warning.main" : "text.disabled" }}>
+                  {value > 0 ? `-${value}` : 0}
+                </Typography>
+              </Box>
+            ),
+          }]
+        : []),
       {
         field: "stockDifference",
         headerName: "Dif.",
         width: 80,
         type: "number",
+        // En el Hub, "Dif." descuenta lo comprometido para reflejar el disponible
+        // real (stock - requerido - reservado). En el resto, es la dif. cruda.
+        valueGetter: (value, row) =>
+          control?.isHub ? value - (row.committed || 0) : value,
         renderCell: ({ value }) => {
           const color = value < 0 ? "error.main" : value > 0 ? "success.main" : "text.primary";
           return (
@@ -254,11 +294,14 @@ export default function StockControlShow() {
               color={STOCK_STATUS_COLOR[row.stockStatusId] || "default"}
               size="small"
             />
-            {row.orderDetailId && (
-              <Tooltip title="Ya enviado a una orden de reposición">
-                <Chip label="Pedido" color="info" size="small" variant="outlined" />
-              </Tooltip>
-            )}
+            {row.orderedAt && (() => {
+              const dest = ORDER_DEST_LABELS[row.orderDest] || ORDER_DEST_LABELS.default;
+              return (
+                <Tooltip title={dest.tooltip}>
+                  <Chip label={dest.label} color={dest.color} size="small" variant="outlined" />
+                </Tooltip>
+              );
+            })()}
           </Stack>
         ),
       },
@@ -451,7 +494,7 @@ export default function StockControlShow() {
             columns={columns}
             checkboxSelection
             disableRowSelectionOnClick
-            isRowSelectable={({ row }) => row.stockStatusId === 1 && !row.orderDetailId}
+            isRowSelectable={({ row }) => row.stockStatusId === 1 && !row.orderedAt}
             rowSelectionModel={selectionModel}
             onRowSelectionModelChange={(model) => setSelectionModel(model)}
             loading={isLoading}

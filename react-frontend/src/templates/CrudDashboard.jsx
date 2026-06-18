@@ -5,6 +5,7 @@ import DashboardLayout from "../components/DashboardLayout";
 import Dashboard from "../components/Dashboard";
 import ProductList from "../components/ProductList";
 import BrandList from "../components/BrandList";
+import SupplierList from "../components/SupplierList";
 import StockControlList from "../components/StockControlList";
 import StockControlShow from "../components/StockControlShow";
 import OrderList from "../components/OrderList";
@@ -64,6 +65,11 @@ const router = createHashRouter([
       {
         path: "/brands",
         Component: BrandList,
+      },
+      // Suppliers routes
+      {
+        path: "/suppliers",
+        Component: SupplierList,
       },
       // Users routes
       {

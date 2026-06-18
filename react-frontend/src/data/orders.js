@@ -46,6 +46,10 @@ function transformOrderFromBackend(order) {
     orderDate:        order.order_date || order.control_date,
     status:           order.status,
     statusLabel:      getOrderStatusLabel(order.status),
+    orderType:        order.order_type || 'external',
+    isInternal:       order.order_type === 'internal',
+    sourceBranchId:   order.source_branch_id || null,
+    sourceBranchName: order.source_branch_name || '',
     totalItems:       Number(order.total_items || 0),
     totalUnitsOrdered:  Number(order.total_units_ordered || 0),
     totalUnitsReceived: Number(order.total_units_received || 0),
@@ -67,6 +71,7 @@ function transformOrderItemFromBackend(item) {
     categoryName:     item.category_name || '',
     quantityOrdered:  Number(item.quantity_ordered || 0),
     quantityReceived: Number(item.quantity_received || 0),
+    supplierName:     item.supplier_name || '',
     unitCost:         Number(item.unit_cost || 0),
     costEstimate:     Number(item.cost_estimate || 0),
     stockCurrent:     Number(item.stock_current || 0),
@@ -89,9 +94,11 @@ export async function getOrderDetail(orderId) {
   };
 }
 
+// Genera la(s) orden(es) de un control. Con Nodo Hub pueden volver 2 órdenes:
+// una interna (al Hub) y una externa (al proveedor). Devuelve el array.
 export async function createOrderFromControl(monthlyControlId, stockControlIds) {
   const data = await orderService.createFromControl(monthlyControlId, stockControlIds);
-  return transformOrderFromBackend(data.order);
+  return (data.orders || []).map(transformOrderFromBackend);
 }
 
 export async function updateOrderStatus(orderId, status, notes = null) {

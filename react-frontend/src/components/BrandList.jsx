@@ -1,14 +1,17 @@
 import * as React from "react";
 import Alert from "@mui/material/Alert";
+import Autocomplete from "@mui/material/Autocomplete";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import Stack from "@mui/material/Stack";
 import Switch from "@mui/material/Switch";
+import TextField from "@mui/material/TextField";
 import { DataGrid } from "@mui/x-data-grid";
 import { dataGridSx, dataGridLoadingSlotProps } from "./dataGridStyles";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import useNotifications from "../hooks/useNotifications/useNotifications";
 import apiClient from "../services/apiClient";
+import { getSuppliers, setBrandSupplier } from "../data/suppliers";
 import PageContainer from "./PageContainer";
 
 const INITIAL_PAGE_SIZE = 50;
@@ -45,8 +48,13 @@ export default function BrandList() {
   );
 
   const [rowsState, setRowsState] = React.useState({ rows: [], rowCount: 0 });
+  const [suppliers, setSuppliers] = React.useState([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
+
+  React.useEffect(() => {
+    getSuppliers().then(setSuppliers).catch(() => setSuppliers([]));
+  }, []);
 
   const handlePaginationModelChange = React.useCallback(
     (model) => {
@@ -122,10 +130,59 @@ export default function BrandList() {
     [notifications]
   );
 
+  const handleChangeSupplier = React.useCallback(
+    async (brand, supplier) => {
+      const prev = { supplier_id: brand.supplier_id, supplier_name: brand.supplier_name };
+      const next = supplier
+        ? { supplier_id: supplier.id, supplier_name: supplier.supplier_name }
+        : { supplier_id: null, supplier_name: null };
+      // Actualización optimista
+      setRowsState((s) => ({
+        ...s,
+        rows: s.rows.map((r) => (r.id === brand.id ? { ...r, ...next } : r)),
+      }));
+      try {
+        await setBrandSupplier(brand.id, next.supplier_id);
+      } catch (err) {
+        setRowsState((s) => ({
+          ...s,
+          rows: s.rows.map((r) => (r.id === brand.id ? { ...r, ...prev } : r)),
+        }));
+        notifications.show(`Error al asignar proveedor: ${err.message}`, {
+          severity: "error",
+          autoHideDuration: 3000,
+        });
+      }
+    },
+    [notifications]
+  );
+
   const columns = React.useMemo(
     () => [
       { field: "id", headerName: "ID", width: 70 },
       { field: "brand_name", headerName: "Marca", flex: 1, minWidth: 200 },
+      {
+        field: "supplier_id",
+        headerName: "Proveedor",
+        flex: 1,
+        minWidth: 220,
+        sortable: false,
+        filterable: false,
+        renderCell: ({ row }) => (
+          <Autocomplete
+            size="small"
+            options={suppliers}
+            getOptionLabel={(o) => o.supplier_name || ""}
+            isOptionEqualToValue={(o, v) => o.id === v.id}
+            value={suppliers.find((s) => s.id === row.supplier_id) || null}
+            onChange={(_, val) => handleChangeSupplier(row, val)}
+            renderInput={(params) => (
+              <TextField {...params} variant="standard" placeholder="Sin proveedor" />
+            )}
+            sx={{ width: "100%" }}
+          />
+        ),
+      },
       {
         field: "is_groupable",
         headerName: "Agrupable",
@@ -146,7 +203,7 @@ export default function BrandList() {
         ),
       },
     ],
-    [handleToggleIsGroupable]
+    [handleToggleIsGroupable, handleChangeSupplier, suppliers]
   );
 
   const initialState = React.useMemo(

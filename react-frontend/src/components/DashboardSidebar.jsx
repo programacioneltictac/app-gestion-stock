@@ -13,6 +13,7 @@ import AssessmentIcon from "@mui/icons-material/Assessment";
 import StoreIcon from "@mui/icons-material/Store";
 import PeopleIcon from "@mui/icons-material/People";
 import LabelIcon from "@mui/icons-material/Label";
+import LocalShippingIcon from "@mui/icons-material/LocalShipping";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import { matchPath, useLocation } from "react-router";
 import DashboardSidebarContext from "../context/DashboardSidebarContext";
@@ -211,6 +212,13 @@ function DashboardSidebar({
                   icon={<LabelIcon />}
                   href="/brands"
                   selected={!!matchPath("/brands/*", pathname)}
+                />
+                <DashboardSidebarPageItem
+                  id="suppliers"
+                  title="Proveedores"
+                  icon={<LocalShippingIcon />}
+                  href="/suppliers"
+                  selected={!!matchPath("/suppliers/*", pathname)}
                 />
                 <DashboardSidebarPageItem
                   id="users"

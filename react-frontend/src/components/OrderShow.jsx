@@ -145,6 +145,21 @@ export default function OrderShow() {
     () => [
       { field: 'displayName', headerName: 'Producto', flex: 1, minWidth: 220 },
       { field: 'categoryName', headerName: 'Rubro', width: 120 },
+      // Proveedor: solo relevante en órdenes externas (las internas van al Hub).
+      ...(order && !order.isInternal
+        ? [{
+            field: 'supplierName',
+            headerName: 'Proveedor',
+            width: 170,
+            renderCell: ({ value }) => (
+              <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+                <Typography variant="body2" color={value ? 'text.primary' : 'text.disabled'}>
+                  {value || 'Sin asignar'}
+                </Typography>
+              </Box>
+            ),
+          }]
+        : []),
       {
         field: 'quantityOrdered',
         headerName: 'Pedido',
@@ -231,7 +246,7 @@ export default function OrderShow() {
         ),
       },
     ],
-    [editingItemId, editingQty, isSavingItem, isOrderEditable, handleEditItem, handleSaveItemReceived]
+    [editingItemId, editingQty, isSavingItem, isOrderEditable, handleEditItem, handleSaveItemReceived, order]
   );
 
   if (isLoading) {
@@ -279,6 +294,15 @@ export default function OrderShow() {
         <Chip
           label={getOrderStatusLabel(order.status)}
           color={getOrderStatusColor(order.status)}
+        />
+        <Chip
+          variant="outlined"
+          color={order.isInternal ? 'secondary' : 'default'}
+          label={
+            order.isInternal
+              ? `Interna · ${order.sourceBranchName || 'Nodo Hub'}`
+              : 'Externa · Proveedor'
+          }
         />
         <Typography variant="body2">
           Items: <strong>{order.totalItems}</strong>

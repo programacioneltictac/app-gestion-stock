@@ -5,6 +5,8 @@ import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
+import Tab from '@mui/material/Tab';
+import Tabs from '@mui/material/Tabs';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
@@ -35,6 +37,7 @@ export default function OrderList() {
   const [branches, setBranches] = React.useState([]);
   const [filterBranch, setFilterBranch] = React.useState('');
   const [filterStatus, setFilterStatus] = React.useState('');
+  const [activeTab, setActiveTab] = React.useState('external');
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
 
@@ -60,13 +63,25 @@ export default function OrderList() {
     loadData();
   }, [loadData]);
 
-  const filteredOrders = React.useMemo(() => {
+  // Filtro común (sucursal/estado) antes de separar por tipo de orden.
+  const baseFilteredOrders = React.useMemo(() => {
     return orders.filter((o) => {
       if (filterBranch && String(o.branchId) !== String(filterBranch)) return false;
       if (filterStatus && o.status !== filterStatus) return false;
       return true;
     });
   }, [orders, filterBranch, filterStatus]);
+
+  const externalOrders = React.useMemo(
+    () => baseFilteredOrders.filter((o) => !o.isInternal),
+    [baseFilteredOrders]
+  );
+  const internalOrders = React.useMemo(
+    () => baseFilteredOrders.filter((o) => o.isInternal),
+    [baseFilteredOrders]
+  );
+
+  const filteredOrders = activeTab === 'internal' ? internalOrders : externalOrders;
 
   const handleRowView = React.useCallback(
     (order) => () => navigate(`/orders/${order.id}`),
@@ -99,7 +114,15 @@ export default function OrderList() {
   const columns = React.useMemo(
     () => [
       { field: 'id', headerName: 'ID', width: 70 },
-      { field: 'branchName', headerName: 'Sucursal', flex: 1, minWidth: 130 },
+      {
+        field: 'branchName',
+        headerName: activeTab === 'internal' ? 'Sucursal destino' : 'Sucursal',
+        flex: 1,
+        minWidth: 130,
+      },
+      ...(activeTab === 'internal'
+        ? [{ field: 'sourceBranchName', headerName: 'Origen (Hub)', width: 150 }]
+        : []),
       { field: 'period', headerName: 'Período', width: 110 },
       { field: 'totalItems', headerName: 'Items', width: 80, type: 'number' },
       { field: 'totalUnitsOrdered', headerName: 'Uds. pedidas', width: 110, type: 'number' },
@@ -157,7 +180,7 @@ export default function OrderList() {
         ],
       },
     ],
-    [handleRowView, handleRowDelete, isEmployee]
+    [handleRowView, handleRowDelete, isEmployee, activeTab]
   );
 
   return (
@@ -198,6 +221,16 @@ export default function OrderList() {
           />
         </Stack>
       )}
+
+      {/* Separación: órdenes a proveedores (externas) vs Nodo Hub (internas) */}
+      <Tabs
+        value={activeTab}
+        onChange={(_, val) => setActiveTab(val)}
+        sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
+      >
+        <Tab value="external" label={`Proveedores (${externalOrders.length})`} />
+        <Tab value="internal" label={`Nodo Hub (${internalOrders.length})`} />
+      </Tabs>
 
       {error ? (
         <Alert severity="error">{error.message}</Alert>
