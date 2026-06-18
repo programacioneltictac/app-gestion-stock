@@ -26,13 +26,21 @@ class Brand {
       where += ` AND brand_name ILIKE $${params.length}`;
     }
 
+    // Nota: el WHERE filtra sobre brands; al hacer JOIN usamos alias b.
+    const whereB = where.replace(/\bis_active\b/g, "b.is_active").replace(/\bbrand_name\b/g, "b.brand_name");
+
     params.push(pageSize, offset);
     const data = await pool.query(
-      `SELECT id, brand_name, is_groupable FROM brands WHERE ${where} ORDER BY brand_name LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      `SELECT b.id, b.brand_name, b.is_groupable, b.supplier_id, s.supplier_name
+       FROM brands b
+       LEFT JOIN suppliers s ON b.supplier_id = s.id
+       WHERE ${whereB}
+       ORDER BY b.brand_name
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
     const count = await pool.query(
-      `SELECT COUNT(*) as total FROM brands WHERE ${where}`,
+      `SELECT COUNT(*) as total FROM brands b WHERE ${whereB}`,
       params.slice(0, -2)
     );
 
@@ -50,6 +58,18 @@ class Brand {
     const result = await pool.query(
       "UPDATE brands SET is_groupable = $1, updated_at = NOW() WHERE id = $2 AND is_active = true RETURNING id, brand_name, is_groupable",
       [isGroupable, id]
+    );
+    return result.rows[0] || null;
+  }
+
+  // Asigna (o quita, con supplierId = null) el proveedor de una marca.
+  static async updateSupplier(id, supplierId) {
+    const result = await pool.query(
+      `UPDATE brands b SET supplier_id = $1, updated_at = NOW()
+       WHERE b.id = $2 AND b.is_active = true
+       RETURNING b.id, b.brand_name, b.supplier_id,
+                 (SELECT supplier_name FROM suppliers WHERE id = $1) AS supplier_name`,
+      [supplierId, id]
     );
     return result.rows[0] || null;
   }

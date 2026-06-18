@@ -90,6 +90,27 @@ const updateBrandIsGroupable = async (req, res) => {
   }
 };
 
+// PATCH /api/stock/catalogs/brands/:id/supplier
+const updateBrandSupplier = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { supplierId } = req.body;
+
+    if (supplierId !== null && !Number.isInteger(supplierId)) {
+      return res.status(400).json({ status: "error", message: "supplierId debe ser un entero o null" });
+    }
+
+    const updated = await Brand.updateSupplier(id, supplierId);
+    if (!updated) {
+      return res.status(404).json({ status: "error", message: "Marca no encontrada" });
+    }
+
+    res.json({ status: "success", data: updated });
+  } catch (error) {
+    handleControllerError(res, error, "Error actualizando proveedor de la marca:");
+  }
+};
+
 module.exports = {
   getProducts,
   getCategories,
@@ -97,4 +118,5 @@ module.exports = {
   getBrands,
   getBrandsList,
   updateBrandIsGroupable,
+  updateBrandSupplier,
 };

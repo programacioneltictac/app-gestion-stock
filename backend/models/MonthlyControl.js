@@ -17,7 +17,7 @@ class MonthlyControl {
 
   static async findById(id) {
     const result = await pool.query(
-      `SELECT mc.*, b.name as branch_name, b.code as branch_code,
+      `SELECT mc.*, b.name as branch_name, b.code as branch_code, b.is_hub,
               c.category_name,
               u.username as created_by_username
        FROM monthly_controls mc

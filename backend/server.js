@@ -65,6 +65,10 @@ app.use("/api/sync", authenticateToken, syncRoutes);
 const orderRoutes = require("./routes/orders");
 app.use("/api/orders", authenticateToken, orderRoutes);
 
+// Rutas de proveedores (catálogo)
+const supplierRoutes = require("./routes/suppliers");
+app.use("/api/suppliers", supplierRoutes);
+
 // ==================== MANEJO DE ERRORES ====================
 
 app.use(notFoundHandler);

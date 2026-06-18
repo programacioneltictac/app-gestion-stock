@@ -20,4 +20,7 @@ router.get("/brands/list", catalogController.getBrandsList);
 // PATCH /api/stock/catalogs/brands/:id/is-groupable
 router.patch("/brands/:id/is-groupable", catalogController.updateBrandIsGroupable);
 
+// PATCH /api/stock/catalogs/brands/:id/supplier
+router.patch("/brands/:id/supplier", catalogController.updateBrandSupplier);
+
 module.exports = router;

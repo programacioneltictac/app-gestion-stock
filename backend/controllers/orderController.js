@@ -30,7 +30,7 @@ const createFromControl = async (req, res) => {
     }
 
     const ids = stock_control_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0);
-    const { order, itemCount } = await Order.createFromControl(monthly_control_id, req.user.id, ids);
+    const { orders, itemCount } = await Order.createFromControl(monthly_control_id, req.user.id, ids);
 
     if (itemCount === 0) {
       return res.status(400).json({
@@ -39,11 +39,20 @@ const createFromControl = async (req, res) => {
       });
     }
 
-    console.log(`Orden creada - ID: ${order.id}, Control: ${monthly_control_id}, Items: ${itemCount}, Usuario: ${req.user.username}`);
+    // Nodo Hub: pueden generarse hasta 2 ordenes (interna al Hub + externa al proveedor).
+    const internal = orders.find((o) => o.order_type === "internal");
+    const external = orders.find((o) => o.order_type === "external");
+    const parts = [];
+    if (internal) parts.push("interna (Hub)");
+    if (external) parts.push("externa (proveedor)");
+
+    console.log(
+      `Orden(es) creada(s) - IDs: ${orders.map((o) => o.id).join(", ")}, Control: ${monthly_control_id}, Items: ${itemCount}, Tipos: ${parts.join(" + ")}, Usuario: ${req.user.username}`
+    );
     res.status(201).json({
       status: "success",
-      message: `Orden creada con ${itemCount} items`,
-      order
+      message: `Se generaron ${orders.length} orden(es) [${parts.join(" + ")}] con ${itemCount} items`,
+      orders,
     });
   } catch (error) {
     handleControllerError(res, error, "Error creando orden:");

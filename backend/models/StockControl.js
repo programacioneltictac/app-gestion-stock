@@ -156,7 +156,32 @@ class StockControl {
          sc.updated_at,
          sc.ordered_at,
          sc.order_detail_id,
-         psb.last_sync_at
+         psb.last_sync_at,
+         -- Destino del pedido: 'hub' / 'external' / 'both' segun los tipos de
+         -- orden ligados a este control (un control puede partirse en 2 lineas).
+         (
+           SELECT CASE
+                    WHEN bool_or(oc.order_type = 'internal')
+                     AND bool_or(oc.order_type = 'external') THEN 'both'
+                    WHEN bool_or(oc.order_type = 'internal')  THEN 'hub'
+                    WHEN bool_or(oc.order_type = 'external')  THEN 'external'
+                    ELSE NULL
+                  END
+           FROM order_details od
+           JOIN orders_controls oc ON od.order_control_id = oc.id
+           WHERE od.stock_control_id = sc.id
+             AND oc.status <> 'cancelled'
+         )                                                       AS order_dest,
+         -- Comprometido (solo relevante en el control del Hub): unidades de este
+         -- mismo psb reservadas por ordenes internas abiertas de otras sucursales.
+         COALESCE((
+           SELECT SUM(od.quantity_ordered)
+           FROM order_details od
+           JOIN orders_controls oc ON od.order_control_id = oc.id
+           WHERE oc.order_type = 'internal'
+             AND oc.status <> 'cancelled'
+             AND od.product_stock_id = sc.product_stock_id
+         ), 0)                                                   AS committed
        FROM stock_controls sc
        JOIN product_stock_by_branch psb ON sc.product_stock_id = psb.id
        LEFT JOIN products p      ON psb.product_id = p.id
