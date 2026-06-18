@@ -1,6 +1,6 @@
 const axios = require("axios");
 const { pool } = require("../database/config");
-const { parseProductName, detectGroup } = require("./nameParser");
+const { parseProductName, detectGroup, detectBrandInName } = require("./nameParser");
 
 /**
  * Servicio de sincronización con la API externa.
@@ -156,16 +156,32 @@ async function getGroupableBrands() {
 }
 
 /**
+ * Obtiene TODAS las marcas activas (agrupables o no), ordenadas por longitud
+ * descendente. Se usa para resolver products.brand_id por el nombre, incluyendo
+ * marcas no agrupables (ej. METAL ECONOMICO) que detectGroup no detecta.
+ */
+async function getAllBrands() {
+  const result = await pool.query(
+    "SELECT id, brand_name FROM brands WHERE is_active = true ORDER BY LENGTH(brand_name) DESC",
+  );
+  return result.rows;
+}
+
+/**
  * Sincroniza los productos de UNA sucursal iterando todas las categorías con api_product_id.
  * @param {Object} branch - Objeto branch con id, api_branch_code, api_deposit_code
  * @param {Array|null} groupableBrands - Marcas agrupables [{id, brand_name}]; si null se consultan
+ * @param {Array|null} allBrands - Todas las marcas activas [{id, brand_name}]; si null se consultan
  * @returns {{ synced: number, grouped: number, errors: number }}
  */
-async function syncBranch(branch, groupableBrands = null) {
+async function syncBranch(branch, groupableBrands = null, allBrands = null) {
   const stats = { synced: 0, grouped: 0, errors: 0 };
 
   if (!groupableBrands) {
     groupableBrands = await getGroupableBrands();
+  }
+  if (!allBrands) {
+    allBrands = await getAllBrands();
   }
 
   // Obtener categorías con api_product_id configurado.
@@ -260,6 +276,15 @@ async function syncBranch(branch, groupableBrands = null) {
           groupableBrands,
         );
 
+        // Marca del producto (products.brand_id): si está agrupado, la marca del
+        // grupo; si no, se busca la marca conocida en el nombre (cubre marcas no
+        // agrupables como METAL ECONOMICO). Puede quedar null si no hay marca conocida.
+        let brandId = groupInfo.brandId || null;
+        if (!brandId) {
+          const brandMatch = detectBrandInName(cleanName, allBrands);
+          if (brandMatch) brandId = brandMatch.brandId;
+        }
+
         // --- Resolver group_id si corresponde ---
         let groupId = null;
         if (groupInfo.isGrouped) {
@@ -295,8 +320,8 @@ async function syncBranch(branch, groupableBrands = null) {
         const productResult = await client.query(
           `INSERT INTO products
              (product_name, product_code, external_id, display_name,
-              group_id, is_grouped, category_id, cost_price, last_sync_at, is_active)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), true)
+              group_id, is_grouped, category_id, brand_id, cost_price, last_sync_at, is_active)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), true)
            ON CONFLICT (external_id) WHERE external_id IS NOT NULL DO UPDATE
              SET product_name  = EXCLUDED.product_name,
                  product_code  = EXCLUDED.product_code,
@@ -304,6 +329,7 @@ async function syncBranch(branch, groupableBrands = null) {
                  group_id      = EXCLUDED.group_id,
                  is_grouped    = EXCLUDED.is_grouped,
                  category_id   = EXCLUDED.category_id,
+                 brand_id      = EXCLUDED.brand_id,
                  cost_price    = EXCLUDED.cost_price,
                  last_sync_at  = NOW(),
                  updated_at    = NOW()
@@ -316,6 +342,7 @@ async function syncBranch(branch, groupableBrands = null) {
             groupId,
             groupInfo.isGrouped,
             currentCategoryId,
+            brandId,
             costPrice > 0 ? costPrice : null,
           ],
         );
@@ -434,8 +461,9 @@ async function syncBranch(branch, groupableBrands = null) {
  * @returns {Array} Resultados por sucursal
  */
 async function syncAllBranches() {
-  // Obtener marcas agrupables una sola vez para reutilizar entre sucursales
+  // Obtener marcas una sola vez para reutilizar entre sucursales.
   const groupableBrands = await getGroupableBrands();
+  const allBrands = await getAllBrands();
 
   // Obtener sucursales con códigos de API configurados
   const branchesResult = await pool.query(
@@ -467,7 +495,7 @@ async function syncAllBranches() {
     const branchStartTs = Date.now();
     try {
       console.log(`→ Iniciando: ${branch.name}`);
-      const stats = await syncBranch(branch, groupableBrands);
+      const stats = await syncBranch(branch, groupableBrands, allBrands);
       const branchElapsed = Date.now() - branchStartTs;
       console.log(
         `✓ ${branch.name}: ${stats.synced} productos, ${stats.grouped} grupos, ${stats.errors} errores [${formatDuration(branchElapsed)}]`,
