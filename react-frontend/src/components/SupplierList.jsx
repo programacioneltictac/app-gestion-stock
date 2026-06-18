@@ -13,13 +13,17 @@ import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import { DataGrid, GridActionsCellItem } from "@mui/x-data-grid";
 import { dataGridSx, dataGridLoadingSlotProps } from "./dataGridStyles";
+import CircularProgress from "@mui/material/CircularProgress";
+import Divider from "@mui/material/Divider";
+import Typography from "@mui/material/Typography";
 import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import SyncIcon from "@mui/icons-material/Sync";
 import useNotifications from "../hooks/useNotifications/useNotifications";
 import { useDialogs } from "../hooks/useDialogs/useDialogs";
-import { getSuppliers, createSupplier, updateSupplier, deleteSupplier } from "../data/suppliers";
+import { getSuppliers, createSupplier, updateSupplier, deleteSupplier, syncCompras } from "../data/suppliers";
 import PageContainer from "./PageContainer";
 
 export default function SupplierList() {
@@ -35,6 +39,10 @@ export default function SupplierList() {
   const [formName, setFormName] = React.useState("");
   const [formContact, setFormContact] = React.useState("");
   const [isSaving, setIsSaving] = React.useState(false);
+
+  // Sync de compras
+  const [isSyncing, setIsSyncing] = React.useState(false);
+  const [syncReport, setSyncReport] = React.useState(null);
 
   const loadData = React.useCallback(async () => {
     setError(null);
@@ -103,6 +111,26 @@ export default function SupplierList() {
     [dialogs, notifications, loadData]
   );
 
+  const handleSyncCompras = React.useCallback(async () => {
+    const confirmed = await dialogs.confirm(
+      "Se consultará la API de compras de IDUO para dar de alta proveedores y asociar marcas sin proveedor. No se pisan asignaciones existentes ni se crean marcas nuevas. ¿Continuar?",
+      { title: "Sincronizar compras", okText: "Sincronizar", cancelText: "Cancelar" }
+    );
+    if (!confirmed) return;
+    setIsSyncing(true);
+    try {
+      const report = await syncCompras();
+      setSyncReport(report);
+      loadData();
+    } catch (err) {
+      notifications.show(`Error al sincronizar compras: ${err.message}`, {
+        severity: "error",
+        autoHideDuration: 6000,
+      });
+    }
+    setIsSyncing(false);
+  }, [dialogs, notifications, loadData]);
+
   const columns = React.useMemo(
     () => [
       { field: "id", headerName: "ID", width: 70 },
@@ -138,6 +166,15 @@ export default function SupplierList() {
       breadcrumbs={[{ title: "Proveedores" }]}
       actions={
         <Stack direction="row" spacing={1}>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={isSyncing ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />}
+            onClick={handleSyncCompras}
+            disabled={isSyncing}
+          >
+            Sincronizar compras
+          </Button>
           <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={openCreate}>
             Nuevo proveedor
           </Button>
@@ -196,6 +233,58 @@ export default function SupplierList() {
           <Button variant="contained" onClick={handleSave} disabled={isSaving || !formName.trim()}>
             Guardar
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Reporte del sync de compras */}
+      <Dialog open={syncReport !== null} onClose={() => setSyncReport(null)} fullWidth maxWidth="sm">
+        <DialogTitle>Resultado de la sincronización de compras</DialogTitle>
+        <DialogContent dividers>
+          {syncReport && (
+            <Stack spacing={1.5}>
+              {syncReport.aviso && (
+                <Alert severity="warning">{syncReport.aviso}</Alert>
+              )}
+              <Typography variant="body2" color="text.secondary">
+                Rango: {syncReport.rango?.desde} a {syncReport.rango?.hasta} · {syncReport.filas} fila(s) procesadas
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Chip color="success" size="small" label={`Proveedores nuevos: ${syncReport.proveedoresNuevos}`} />
+                <Chip color="primary" size="small" label={`Marcas asignadas: ${syncReport.marcasAsignadas?.length || 0}`} />
+                <Chip color={syncReport.conflictos?.length ? "warning" : "default"} size="small" label={`Conflictos: ${syncReport.conflictos?.length || 0}`} />
+                <Chip size="small" label={`Filas sin marca: ${syncReport.filasSinMarca}`} />
+              </Stack>
+
+              {syncReport.marcasAsignadas?.length > 0 && (
+                <Box>
+                  <Divider sx={{ my: 1 }} />
+                  <Typography variant="subtitle2">Marcas asignadas</Typography>
+                  {syncReport.marcasAsignadas.map((m, i) => (
+                    <Typography key={i} variant="body2">
+                      • {m.brand} → {m.supplier}
+                    </Typography>
+                  ))}
+                </Box>
+              )}
+
+              {syncReport.conflictos?.length > 0 && (
+                <Box>
+                  <Divider sx={{ my: 1 }} />
+                  <Typography variant="subtitle2" color="warning.main">
+                    Conflictos (no se modificaron — revisar a mano)
+                  </Typography>
+                  {syncReport.conflictos.map((c, i) => (
+                    <Typography key={i} variant="body2">
+                      • {c.brand}: ya tiene proveedor; las compras sugieren “{c.pretendido}”
+                    </Typography>
+                  ))}
+                </Box>
+              )}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" onClick={() => setSyncReport(null)}>Cerrar</Button>
         </DialogActions>
       </Dialog>
     </PageContainer>

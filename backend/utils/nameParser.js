@@ -138,4 +138,31 @@ function detectGroup(cleanName, categoryName, groupableBrands) {
   return { isGrouped: false, groupKey: null, displayName: null, brandId: null, brandKeyword: null };
 }
 
-module.exports = { parseProductName, detectGroup };
+/**
+ * Detecta qué marca conocida aparece en el nombre de un producto. A diferencia
+ * de detectGroup, NO necesita la categoría: solo busca la marca (para asociar
+ * proveedor en el sync de compras). Devuelve el id de la primera marca contenida
+ * en el nombre, priorizando las más largas (para que "CELINE KHAN" gane a "KHAN").
+ *
+ * @param {string} productName  - Nombre del producto (texto libre de la API).
+ * @param {Array}  brands       - Array de { id, brand_name }.
+ * @returns {{ brandId: number, brandName: string } | null}
+ */
+function detectBrandInName(productName, brands) {
+  if (!productName || !Array.isArray(brands) || brands.length === 0) return null;
+
+  const upperName = productName.toUpperCase();
+  const sorted = [...brands].sort((a, b) => b.brand_name.length - a.brand_name.length);
+
+  for (const brand of sorted) {
+    const keyword = brand.brand_name.toUpperCase();
+    // Límite de palabra para no matchear substrings accidentales (ej: "RAY" en "SPRAY").
+    const re = new RegExp(`\\b${escapeRegex(keyword)}\\b`, "i");
+    if (re.test(upperName)) {
+      return { brandId: brand.id, brandName: brand.brand_name };
+    }
+  }
+  return null;
+}
+
+module.exports = { parseProductName, detectGroup, detectBrandInName };

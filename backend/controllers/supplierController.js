@@ -1,4 +1,5 @@
 const Supplier = require("../models/Supplier");
+const { syncCompras } = require("../utils/comprasService");
 const { handleControllerError } = require("../utils/errorHelper");
 
 // GET /api/suppliers
@@ -80,10 +81,30 @@ const deleteSupplier = async (req, res) => {
   }
 };
 
+// POST /api/suppliers/sync-compras
+// Sincroniza la API de compras de IDUO: puebla proveedores y asocia marca→proveedor
+// (solo rellena marcas sin proveedor; reporta conflictos; ignora marcas nuevas).
+const syncComprasController = async (req, res) => {
+  try {
+    const { monthsBack, desde, hasta } = req.body || {};
+    const opts = {};
+    if (monthsBack) opts.monthsBack = Number(monthsBack);
+    if (desde) opts.desde = new Date(desde);
+    if (hasta) opts.hasta = new Date(hasta);
+
+    console.log(`Sync de compras iniciado por: ${req.user.username}`);
+    const report = await syncCompras(opts);
+    res.json({ status: "success", report });
+  } catch (error) {
+    handleControllerError(res, error, "Error sincronizando compras:");
+  }
+};
+
 module.exports = {
   getAllSuppliers,
   getSupplierById,
   createSupplier,
   updateSupplier,
   deleteSupplier,
+  syncCompras: syncComprasController,
 };

@@ -33,3 +33,10 @@ export async function setBrandSupplier(brandId, supplierId) {
     supplierId: supplierId ?? null,
   });
 }
+
+// Sincroniza la API de compras de IDUO: puebla proveedores y asocia marca→proveedor.
+// Devuelve el reporte de la corrida. monthsBack opcional (default backend).
+export async function syncCompras({ monthsBack } = {}) {
+  const data = await apiClient.post("/suppliers/sync-compras", monthsBack ? { monthsBack } : {});
+  return data.report;
+}
