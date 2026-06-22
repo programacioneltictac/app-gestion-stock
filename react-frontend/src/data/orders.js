@@ -38,6 +38,8 @@ function transformOrderFromBackend(order) {
     branchId:         order.branch_id,
     branchName:       order.branch_name || '',
     branchCode:       order.branch_code || '',
+    categoryId:       order.category_id || null,
+    categoryName:     order.category_name || '',
     controlYear:      order.control_year,
     controlMonth:     order.control_month,
     period:           order.control_year && order.control_month
@@ -69,6 +71,8 @@ function transformOrderItemFromBackend(item) {
     productStockId:   item.product_stock_id,
     displayName:      item.display_name || '',
     categoryName:     item.category_name || '',
+    conditionId:      item.condition_id || null,
+    conditionName:    item.condition_name || '',
     quantityOrdered:  Number(item.quantity_ordered || 0),
     quantityReceived: Number(item.quantity_received || 0),
     supplierName:     item.supplier_name || '',

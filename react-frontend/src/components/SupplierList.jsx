@@ -7,13 +7,10 @@ import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
-import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
-import Tooltip from "@mui/material/Tooltip";
 import { DataGrid, GridActionsCellItem } from "@mui/x-data-grid";
 import { dataGridSx, dataGridLoadingSlotProps } from "./dataGridStyles";
-import CircularProgress from "@mui/material/CircularProgress";
 import Divider from "@mui/material/Divider";
 import Typography from "@mui/material/Typography";
 import AddIcon from "@mui/icons-material/Add";
@@ -25,6 +22,7 @@ import useNotifications from "../hooks/useNotifications/useNotifications";
 import { useDialogs } from "../hooks/useDialogs/useDialogs";
 import { getSuppliers, createSupplier, updateSupplier, deleteSupplier, syncCompras } from "../data/suppliers";
 import PageContainer from "./PageContainer";
+import ActionButton from "./ActionButton";
 
 export default function SupplierList() {
   const notifications = useNotifications();
@@ -166,25 +164,24 @@ export default function SupplierList() {
       breadcrumbs={[{ title: "Proveedores" }]}
       actions={
         <Stack direction="row" spacing={1}>
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={isSyncing ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />}
+          <ActionButton
+            icon={<SyncIcon />}
+            loading={isSyncing}
+            loadingText="Sincronizando..."
             onClick={handleSyncCompras}
-            disabled={isSyncing}
           >
             Sincronizar compras
-          </Button>
-          <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={openCreate}>
+          </ActionButton>
+          <ActionButton variant="primary" icon={<AddIcon />} onClick={openCreate}>
             Nuevo proveedor
-          </Button>
-          <Tooltip title="Recargar" enterDelay={1000}>
-            <div>
-              <IconButton size="small" onClick={() => !isLoading && loadData()}>
-                <RefreshIcon />
-              </IconButton>
-            </div>
-          </Tooltip>
+          </ActionButton>
+          <ActionButton
+            icon={<RefreshIcon />}
+            onClick={() => !isLoading && loadData()}
+            disabled={isLoading}
+          >
+            Actualizar
+          </ActionButton>
         </Stack>
       }
     >

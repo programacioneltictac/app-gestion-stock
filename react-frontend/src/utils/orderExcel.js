@@ -15,6 +15,7 @@ export async function exportOrderToExcel(order, items) {
   const columns = [
     { header: 'Producto', key: 'displayName', width: 40 },
     { header: 'Rubro', key: 'categoryName', width: 18 },
+    { header: 'Condición', key: 'conditionName', width: 16 },
     ...(showSupplier ? [{ header: 'Proveedor', key: 'supplierName', width: 24 }] : []),
     { header: 'Pedido', key: 'quantityOrdered', width: 10 },
     { header: 'Recibido', key: 'quantityReceived', width: 10 },
@@ -33,6 +34,7 @@ export async function exportOrderToExcel(order, items) {
     sheet.addRow({
       displayName: it.displayName,
       categoryName: it.categoryName,
+      conditionName: it.conditionName || '—',
       ...(showSupplier ? { supplierName: it.supplierName || 'Sin asignar' } : {}),
       quantityOrdered: it.quantityOrdered,
       quantityReceived: it.quantityReceived,

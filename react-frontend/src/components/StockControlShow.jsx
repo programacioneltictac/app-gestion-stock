@@ -13,6 +13,7 @@ import Typography from "@mui/material/Typography";
 import { DataGrid, GridActionsCellItem } from "@mui/x-data-grid";
 import { dataGridSx } from "./dataGridStyles";
 import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
@@ -30,6 +31,7 @@ import {
 } from "../data/stock";
 import { createOrderFromControl } from "../data/orders";
 import PageContainer from "./PageContainer";
+import ActionButton from "./ActionButton";
 
 const STOCK_STATUS_COLOR = { 1: "error", 2: "success", 3: "warning", 4: "warning" };
 
@@ -69,11 +71,13 @@ export default function StockControlShow() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
 
-  // Inline add form state
+  // Inline add/edit form state. editingItemId != null => modo edición de un
+  // ítem ya cargado (recupera producto/condición/stock mínimo en el form).
   const [selectedProduct, setSelectedProduct] = React.useState(null);
   const [selectedCondition, setSelectedCondition] = React.useState("");
   const [stockRequire, setStockRequire] = React.useState("");
   const [isSaving, setIsSaving] = React.useState(false);
+  const [editingItemId, setEditingItemId] = React.useState(null);
 
   // Selección de ítems para generar orden parcial
   const [selectionModel, setSelectionModel] = React.useState([]);
@@ -129,6 +133,7 @@ export default function StockControlShow() {
       setSelectedProduct(null);
       setSelectedCondition("");
       setStockRequire("");
+      setEditingItemId(null);
     } catch (err) {
       notifications.show(`Error al guardar: ${err.message}`, {
         severity: "error",
@@ -137,6 +142,29 @@ export default function StockControlShow() {
     }
     setIsSaving(false);
   }, [selectedProduct, stockRequire, selectedCondition, controlId, branchId, control, notifications]);
+
+  // Edición: recupera un ítem ya cargado en el mismo formulario de alta. El
+  // upsert del backend (ON CONFLICT por product_stock_id) lo actualiza en vez
+  // de duplicar. Se construye un selectedProduct sintético con la ref del psb
+  // (el ítem ya existe en la sucursal). No editable si ya fue pedido (ordered_at).
+  const handleEditItem = React.useCallback((item) => {
+    setEditingItemId(item.id);
+    setSelectedProduct({
+      key: `edit-${item.productStockId}`,
+      displayName: item.displayName,
+      isGlobal: false,
+      ref: { productStockId: item.productStockId },
+    });
+    setSelectedCondition(item.conditionId || "");
+    setStockRequire(String(item.stockRequire));
+  }, []);
+
+  const handleCancelEdit = React.useCallback(() => {
+    setEditingItemId(null);
+    setSelectedProduct(null);
+    setSelectedCondition("");
+    setStockRequire("");
+  }, []);
 
   const handleDeleteItem = React.useCallback(
     (item) => async () => {
@@ -309,21 +337,32 @@ export default function StockControlShow() {
         field: "actions",
         type: "actions",
         headerName: "",
-        width: 60,
-        getActions: ({ row }) =>
-          control?.status === "draft"
-            ? [
-                <GridActionsCellItem
-                  key="delete"
-                  icon={<DeleteIcon />}
-                  label="Eliminar"
-                  onClick={handleDeleteItem(row)}
-                />,
-              ]
-            : [],
+        width: 90,
+        getActions: ({ row }) => {
+          if (control?.status !== "draft") return [];
+          // Los ítems ya pedidos (ordered_at) no se editan: su cantidad ya
+          // viajó a una orden. Para cambiarlos hay que eliminar el ítem (lo
+          // que reabre el pedido) y volver a cargarlo.
+          const isOrdered = !!row.orderedAt;
+          return [
+            <GridActionsCellItem
+              key="edit"
+              icon={<EditIcon />}
+              label={isOrdered ? "No editable: ya pedido" : "Editar"}
+              disabled={isOrdered}
+              onClick={() => handleEditItem(row)}
+            />,
+            <GridActionsCellItem
+              key="delete"
+              icon={<DeleteIcon />}
+              label="Eliminar"
+              onClick={handleDeleteItem(row)}
+            />,
+          ];
+        },
       },
     ],
-    [control, handleDeleteItem]
+    [control, handleDeleteItem, handleEditItem]
   );
 
   const stats = React.useMemo(() => {
@@ -341,47 +380,39 @@ export default function StockControlShow() {
 
   return (
     <PageContainer
-      title={control ? `${control.branchName} - ${control.categoryName}` : "Control de Stock"}
+      title={control ? `${control.branchName} - ${control.categoryName}` : "Stock Prioritario"}
       breadcrumbs={[
-        { title: "Control de Stock", href: `/stock-control/${branchId}` },
+        { title: "Stock Prioritario", href: `/stock-control/${branchId}` },
         { title: control?.branchName || "Sucursal" },
         { title: control?.categoryName || "Cargando..." },
       ]}
       actions={
         <Stack direction="row" alignItems="center" spacing={1}>
-          <Tooltip title="Volver" enterDelay={1000}>
-            <IconButton size="small" onClick={handleBack}>
-              <ArrowBackIcon />
-            </IconButton>
-          </Tooltip>
+          <ActionButton icon={<ArrowBackIcon />} onClick={handleBack}>
+            Volver
+          </ActionButton>
           {control?.status === "draft" && (
-            <Button
-              variant="contained"
+            <ActionButton
+              variant="primary"
               color="success"
+              icon={<CheckCircleIcon />}
               onClick={handleCompleteControl}
-              startIcon={<CheckCircleIcon />}
             >
               Completar
-            </Button>
+            </ActionButton>
           )}
           {control && orderableIds.length > 0 && (
-            <Button
-              variant="contained"
+            <ActionButton
+              variant="primary"
               color="warning"
+              icon={<ShoppingCartIcon />}
+              loading={isGenerating}
+              loadingText="Generando..."
               onClick={handleGenerateOrder}
-              disabled={selectionModel.length === 0 || isGenerating}
-              startIcon={
-                isGenerating ? (
-                  <CircularProgress size={16} color="inherit" />
-                ) : (
-                  <ShoppingCartIcon />
-                )
-              }
+              disabled={selectionModel.length === 0}
             >
-              {isGenerating
-                ? "Generando..."
-                : `Generar orden (${selectionModel.length})`}
-            </Button>
+              {`Generar orden (${selectionModel.length})`}
+            </ActionButton>
           )}
         </Stack>
       }
@@ -417,6 +448,8 @@ export default function StockControlShow() {
             value={selectedProduct}
             onChange={(_, val) => setSelectedProduct(val)}
             isOptionEqualToValue={(o, v) => o.key === v.key}
+            // En edición el producto queda fijo (se edita condición/stock mínimo).
+            disabled={editingItemId !== null}
             renderOption={(props, option) => (
               <Box component="li" {...props} key={option.key}>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
@@ -461,8 +494,17 @@ export default function StockControlShow() {
             disabled={!canAdd || isSaving}
             startIcon={isSaving ? <CircularProgress size={16} color="inherit" /> : null}
           >
-            {isSaving ? "Guardando..." : "Agregar / Actualizar"}
+            {isSaving
+              ? "Guardando..."
+              : editingItemId !== null
+                ? "Guardar cambios"
+                : "Agregar"}
           </Button>
+          {editingItemId !== null && (
+            <Button variant="text" color="inherit" onClick={handleCancelEdit} disabled={isSaving}>
+              Cancelar
+            </Button>
+          )}
         </Stack>
       )}
 

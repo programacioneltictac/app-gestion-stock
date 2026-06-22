@@ -7,10 +7,8 @@ import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
-import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
-import Tooltip from "@mui/material/Tooltip";
 import Chip from "@mui/material/Chip";
 import { DataGrid, GridActionsCellItem } from "@mui/x-data-grid";
 import { dataGridClickableSx, dataGridLoadingSlotProps } from "./dataGridStyles";
@@ -30,6 +28,7 @@ import {
 import { getCategories } from "../data/catalogs";
 import { getBranchesList } from "../data/branches";
 import PageContainer from "./PageContainer";
+import ActionButton from "./ActionButton";
 
 export default function StockControlList() {
   const { branchId } = useParams();
@@ -249,30 +248,22 @@ export default function StockControlList() {
     <PageContainer
       title={pageTitle}
       breadcrumbs={[
-        { title: "Control de Stock", href: `/stock-control/${branchId}` },
+        { title: "Stock Prioritario", href: `/stock-control/${branchId}` },
         { title: branch?.name || "Cargando..." },
       ]}
       actions={
         <Stack direction="row" alignItems="center" spacing={1}>
-          <Tooltip title="Recargar datos" placement="right" enterDelay={1000}>
-            <div>
-              <IconButton
-                size="small"
-                aria-label="refresh"
-                onClick={handleRefresh}
-              >
-                <RefreshIcon />
-              </IconButton>
-            </div>
-          </Tooltip>
-          <Button
-            variant="contained"
+          <ActionButton icon={<RefreshIcon />} onClick={handleRefresh}>
+            Actualizar
+          </ActionButton>
+          <ActionButton
+            variant="primary"
+            icon={<AddIcon />}
             onClick={handleOpenCreate}
-            startIcon={<AddIcon />}
             disabled={!branch}
           >
             Crear
-          </Button>
+          </ActionButton>
         </Stack>
       }
     >

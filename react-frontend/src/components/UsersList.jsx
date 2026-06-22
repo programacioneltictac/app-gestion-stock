@@ -1,10 +1,7 @@
 import * as React from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
-import Tooltip from "@mui/material/Tooltip";
 import Chip from "@mui/material/Chip";
 import { DataGrid, GridActionsCellItem } from "@mui/x-data-grid";
 import { dataGridSx } from "./dataGridStyles";
@@ -17,6 +14,7 @@ import { useDialogs } from "../hooks/useDialogs/useDialogs";
 import useNotifications from "../hooks/useNotifications/useNotifications";
 import { getUsers, deleteUser } from "../data/users";
 import PageContainer from "./PageContainer";
+import ActionButton from "./ActionButton";
 
 export default function UsersList() {
   const navigate = useNavigate();
@@ -176,22 +174,12 @@ export default function UsersList() {
       breadcrumbs={[{ title: pageTitle }]}
       actions={
         <Stack direction="row" alignItems="center" spacing={1}>
-          <Tooltip title="Recargar datos" placement="right" enterDelay={1000}>
-            <IconButton
-              size="small"
-              aria-label="refresh"
-              onClick={handleRefresh}
-            >
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
-          <Button
-            variant="contained"
-            onClick={handleCreate}
-            startIcon={<AddIcon />}
-          >
+          <ActionButton icon={<RefreshIcon />} onClick={handleRefresh}>
+            Actualizar
+          </ActionButton>
+          <ActionButton variant="primary" icon={<AddIcon />} onClick={handleCreate}>
             Crear
-          </Button>
+          </ActionButton>
         </Stack>
       }
     >

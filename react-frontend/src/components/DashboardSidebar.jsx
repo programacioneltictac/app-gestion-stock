@@ -167,7 +167,7 @@ function DashboardSidebar({
             />
             <DashboardSidebarPageItem
               id="stock-control"
-              title="Control de Stock"
+              title="Stock Prioritario"
               icon={<InventoryIcon />}
               href="/stock-control"
               selected={!!matchPath("/stock-control/*", pathname)}

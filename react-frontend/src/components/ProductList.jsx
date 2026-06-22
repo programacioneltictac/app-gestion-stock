@@ -1,10 +1,7 @@
 import * as React from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
-import CircularProgress from "@mui/material/CircularProgress";
-import Stack from "@mui/material/Stack";
 import { DataGrid } from "@mui/x-data-grid";
 import { dataGridSx, dataGridLoadingSlotProps } from "./dataGridStyles";
 import SyncIcon from "@mui/icons-material/Sync";
@@ -12,6 +9,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router";
 import useNotifications from "../hooks/useNotifications/useNotifications";
 import { getMany as getProducts, syncAll } from "../data/products";
 import PageContainer from "./PageContainer";
+import ActionButton from "./ActionButton";
 
 const INITIAL_PAGE_SIZE = 50;
 
@@ -150,14 +148,15 @@ export default function ProductList() {
       title="Productos"
       breadcrumbs={[{ title: "Productos" }]}
       actions={
-        <Button
-          variant="contained"
-          startIcon={isSyncing ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />}
+        <ActionButton
+          variant="primary"
+          icon={<SyncIcon />}
+          loading={isSyncing}
+          loadingText="Sincronizando..."
           onClick={handleSync}
-          disabled={isSyncing}
         >
-          {isSyncing ? "Sincronizando..." : "Sincronizar"}
-        </Button>
+          Sincronizar
+        </ActionButton>
       }
     >
       <Box sx={{ flex: 1, width: "100%" }}>

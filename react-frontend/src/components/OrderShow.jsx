@@ -34,6 +34,7 @@ import {
   ORDER_STATUS_OPTIONS,
 } from '../data/orders';
 import PageContainer from './PageContainer';
+import ActionButton from './ActionButton';
 import { exportOrderToExcel } from '../utils/orderExcel';
 
 const formatCurrency = (value) =>
@@ -251,6 +252,18 @@ export default function OrderShow() {
         },
       },
       { field: 'categoryName', headerName: 'Rubro', width: 120 },
+      {
+        field: 'conditionName',
+        headerName: 'Condición',
+        width: 130,
+        renderCell: ({ value }) => (
+          <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+            {value
+              ? <Chip label={value} size="small" variant="outlined" color="info" />
+              : <Typography variant="body2" color="text.disabled">—</Typography>}
+          </Box>
+        ),
+      },
       // Proveedor: solo relevante en órdenes externas (las internas van al Hub).
       ...(order && !order.isInternal
         ? [{
@@ -380,37 +393,32 @@ export default function OrderShow() {
       ]}
       actions={
         <Stack direction="row" spacing={1} alignItems="center">
-          <Tooltip title="Descargar Excel" enterDelay={600}>
-            <span>
-              <IconButton size="small" color="primary" onClick={handleDownloadExcel} disabled={items.length === 0}>
-                <FileDownloadIcon />
-              </IconButton>
-            </span>
-          </Tooltip>
+          <ActionButton
+            icon={<FileDownloadIcon />}
+            color="primary"
+            onClick={handleDownloadExcel}
+            disabled={items.length === 0}
+          >
+            Descargar
+          </ActionButton>
           {isOrderEditable && hasPendingItems && (
-            <Button
-              size="small"
-              variant="outlined"
+            <ActionButton
               color="success"
-              startIcon={isReceivingAll ? <CircularProgress size={16} color="inherit" /> : <DoneAllIcon />}
+              icon={<DoneAllIcon />}
+              loading={isReceivingAll}
               onClick={handleReceiveAll}
-              disabled={isReceivingAll}
             >
               Marcar todo recibido
-            </Button>
+            </ActionButton>
           )}
           {canDelete && (
-            <Tooltip title="Eliminar orden" enterDelay={1000}>
-              <IconButton size="small" color="error" onClick={handleDelete}>
-                <DeleteIcon />
-              </IconButton>
-            </Tooltip>
+            <ActionButton variant="danger" icon={<DeleteIcon />} onClick={handleDelete}>
+              Eliminar
+            </ActionButton>
           )}
-          <Tooltip title="Volver" enterDelay={1000}>
-            <IconButton size="small" onClick={() => navigate('/orders')}>
-              <ArrowBackIcon />
-            </IconButton>
-          </Tooltip>
+          <ActionButton icon={<ArrowBackIcon />} onClick={() => navigate('/orders')}>
+            Volver
+          </ActionButton>
         </Stack>
       }
     >

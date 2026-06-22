@@ -3,12 +3,10 @@ import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
-import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import TextField from '@mui/material/TextField';
-import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import { DataGrid, GridActionsCellItem } from '@mui/x-data-grid';
 import { dataGridClickableSx, dataGridLoadingSlotProps } from './dataGridStyles';
@@ -22,6 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { getOrders, deleteOrder, getOrderStatusLabel, getOrderStatusColor, ORDER_STATUSES } from '../data/orders';
 import { getBranchesList } from '../data/branches';
 import PageContainer from './PageContainer';
+import ActionButton from './ActionButton';
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(value);
@@ -123,6 +122,14 @@ export default function OrderList() {
       ...(activeTab === 'internal'
         ? [{ field: 'sourceBranchName', headerName: 'Origen (Hub)', width: 150 }]
         : []),
+      {
+        field: 'categoryName',
+        headerName: 'Rubro',
+        width: 150,
+        renderCell: ({ value }) => (
+          <Chip label={value || '—'} size="small" variant="outlined" />
+        ),
+      },
       { field: 'period', headerName: 'Período', width: 110 },
       { field: 'totalItems', headerName: 'Items', width: 80, type: 'number' },
       { field: 'totalUnitsOrdered', headerName: 'Uds. pedidas', width: 110, type: 'number' },
@@ -188,13 +195,13 @@ export default function OrderList() {
       title="Ordenes de Reposicion"
       breadcrumbs={[{ title: 'Ordenes de Reposicion' }]}
       actions={
-        <Tooltip title="Recargar" placement="right" enterDelay={1000}>
-          <div>
-            <IconButton size="small" onClick={() => !isLoading && loadData()}>
-              <RefreshIcon />
-            </IconButton>
-          </div>
-        </Tooltip>
+        <ActionButton
+          icon={<RefreshIcon />}
+          onClick={() => !isLoading && loadData()}
+          disabled={isLoading}
+        >
+          Actualizar
+        </ActionButton>
       }
     >
       {/* Filtros — solo para admin/manager */}
