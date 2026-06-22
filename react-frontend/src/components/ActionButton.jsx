@@ -9,20 +9,22 @@ import CircularProgress from '@mui/material/CircularProgress';
  * Reglas de diseño (uniformes en toda la app):
  *  - SIEMPRE lleva texto + icono (no botones de solo icono en las cabeceras).
  *  - `size="small"` por defecto.
- *  - `variant`:
- *      'primary'   -> contained  (acción principal: Crear, Sincronizar, Completar)
- *      'secondary' -> outlined    (acción de apoyo: Actualizar, Volver, Descargar)
- *      'danger'    -> outlined color error (Eliminar)
- *    También se acepta el `variant` nativo de MUI por compatibilidad.
+ *  - TODOS los botones son RELLENOS (variant="contained"); no usamos botones
+ *    transparentes/outlined en las cabeceras, para un look uniforme.
+ *  - `variant` (rol, no estilo MUI):
+ *      'primary'   -> contained color primary  (acción principal: Crear, Sincronizar, Completar)
+ *      'secondary' -> contained color primary  (acción de apoyo: Actualizar, Volver, Descargar)
+ *      'danger'    -> contained color error     (Eliminar)
+ *    Se puede sobreescribir el color con la prop `color` (ej. success/warning).
  *  - `loading`: muestra spinner en el icono y deshabilita el botón. `loadingText`
  *    (opcional) reemplaza el texto mientras carga.
  *
  * Cualquier otra prop (color, disabled, sx, ...) se pasa tal cual al Button.
  */
 const VARIANT_MAP = {
-  primary:   { variant: 'contained' },
-  secondary: { variant: 'outlined', color: 'inherit' },
-  danger:    { variant: 'outlined', color: 'error' },
+  primary:   { variant: 'contained', color: 'primary' },
+  secondary: { variant: 'contained', color: 'primary' },
+  danger:    { variant: 'contained', color: 'error' },
 };
 
 export default function ActionButton({

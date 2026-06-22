@@ -241,8 +241,8 @@ export default function StockControlList() {
   );
 
   const pageTitle = branch
-    ? `Controles de Stock - ${branch.name}`
-    : "Controles de Stock";
+    ? `Stock Prioritario - ${branch.name}`
+    : "Stock Prioritario";
 
   return (
     <PageContainer
