@@ -18,6 +18,11 @@ router.put("/monthly-control/complete", stockController.completeMonthlyControl);
 // GET /api/stock/monthly-control/history
 router.get("/monthly-control/history", stockController.getMonthlyControlHistory);
 
+// GET /api/stock/monthly-control/:control_id/discontinued — productos con stock
+// del mismo rubro NO incluidos en el control (solo lectura). Antes de la ruta
+// genérica :control_id para que no la capture.
+router.get("/monthly-control/:control_id/discontinued", stockController.getDiscontinued);
+
 // GET /api/stock/monthly-control/:control_id — detalle de un control por id.
 // Debe ir DESPUÉS de las rutas literales (current, history) para no capturarlas.
 router.get("/monthly-control/:control_id", stockController.getMonthlyControlById);

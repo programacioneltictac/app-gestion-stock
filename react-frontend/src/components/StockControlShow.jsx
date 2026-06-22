@@ -7,6 +7,8 @@ import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
+import Tab from "@mui/material/Tab";
+import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
@@ -28,12 +30,25 @@ import {
   getAvailableProducts,
   getConditions,
   getControlById,
+  getDiscontinuedProducts,
 } from "../data/stock";
 import { createOrderFromControl } from "../data/orders";
 import PageContainer from "./PageContainer";
 import ActionButton from "./ActionButton";
 
 const STOCK_STATUS_COLOR = { 1: "error", 2: "success", 3: "warning", 4: "warning" };
+
+// Condición 'NUEVA MARCA' (id 4): productos a prueba, NO elegibles para
+// reposición (no se pueden seleccionar para generar orden). Espeja la regla
+// del backend en Order.createFromControl.
+const NON_REPLENISHABLE_CONDITION_ID = 4;
+
+// ¿Este ítem se puede pedir? Debe estar en "Generar Pedido" (1), no haber sido
+// ya pedido, y no ser 'NUEVA MARCA'.
+const isOrderable = (item) =>
+  item.stockStatusId === 1 &&
+  !item.orderedAt &&
+  item.conditionId !== NON_REPLENISHABLE_CONDITION_ID;
 
 // Etiqueta de la píldora "ya pedido" según el destino de la orden.
 const ORDER_DEST_LABELS = {
@@ -42,6 +57,9 @@ const ORDER_DEST_LABELS = {
   both:     { label: "Pedido (Hub+proveedor)", color: "primary",  tooltip: "Pedido parcial al Hub y el resto a proveedor" },
   default:  { label: "Pedido",                color: "info",      tooltip: "Ya enviado a una orden de reposición" },
 };
+
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value || 0);
 
 // Formatea un ISO timestamp a "dd/mm/aaaa hh:mm" en hora local.
 function formatSyncDate(iso) {
@@ -83,6 +101,12 @@ export default function StockControlShow() {
   const [selectionModel, setSelectionModel] = React.useState([]);
   const [isGenerating, setIsGenerating] = React.useState(false);
 
+  // Tab activa: 'control' (la tabla del control) | 'discontinued' (solo lectura).
+  const [activeTab, setActiveTab] = React.useState("control");
+  const [discontinued, setDiscontinued] = React.useState([]);
+  const [discLoaded, setDiscLoaded] = React.useState(false);
+  const [isLoadingDisc, setIsLoadingDisc] = React.useState(false);
+
   const loadData = React.useCallback(async () => {
     setError(null);
     setIsLoading(true);
@@ -110,6 +134,27 @@ export default function StockControlShow() {
   React.useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Carga (lazy) de discontinuos: solo la primera vez que se entra a la tab.
+  const loadDiscontinued = React.useCallback(async () => {
+    setIsLoadingDisc(true);
+    try {
+      const data = await getDiscontinuedProducts(Number(controlId));
+      setDiscontinued(data);
+      setDiscLoaded(true);
+    } catch (err) {
+      notifications.show(`Error al cargar discontinuos: ${err.message}`, {
+        severity: "error",
+        autoHideDuration: 4000,
+      });
+    }
+    setIsLoadingDisc(false);
+  }, [controlId, notifications]);
+
+  const handleChangeTab = React.useCallback((_, val) => {
+    setActiveTab(val);
+    if (val === "discontinued" && !discLoaded) loadDiscontinued();
+  }, [discLoaded, loadDiscontinued]);
 
   const handleBack = React.useCallback(() => {
     navigate(`/stock-control/${branchId}`);
@@ -228,7 +273,7 @@ export default function StockControlShow() {
 
   // Ítems pedibles: estado generar_pedido (1) y aún no enviados a una orden.
   const orderableIds = React.useMemo(
-    () => items.filter((i) => i.stockStatusId === 1 && !i.orderedAt).map((i) => i.id),
+    () => items.filter(isOrderable).map((i) => i.id),
     [items]
   );
 
@@ -314,7 +359,7 @@ export default function StockControlShow() {
       {
         field: "stockStatusName",
         headerName: "Estado",
-        width: 180,
+        width: 210,
         renderCell: ({ value, row }) => (
           <Stack direction="row" spacing={0.5} alignItems="center" sx={{ height: "100%" }}>
             <Chip
@@ -330,6 +375,15 @@ export default function StockControlShow() {
                 </Tooltip>
               );
             })()}
+            {/* 'NUEVA MARCA' a prueba: aclarar por qué no se puede pedir cuando
+                está en "Generar Pedido" y aún no fue pedido. */}
+            {row.conditionId === NON_REPLENISHABLE_CONDITION_ID &&
+              row.stockStatusId === 1 &&
+              !row.orderedAt && (
+                <Tooltip title="Producto a prueba (NUEVA MARCA): no entra en órdenes de reposición">
+                  <Chip label="No reponible" color="default" size="small" variant="outlined" />
+                </Tooltip>
+              )}
           </Stack>
         ),
       },
@@ -363,6 +417,28 @@ export default function StockControlShow() {
       },
     ],
     [control, handleDeleteItem, handleEditItem]
+  );
+
+  // Columnas de la tabla de discontinuos (solo lectura): Producto, Rubro,
+  // Stock, Costo unit.
+  const discontinuedColumns = React.useMemo(
+    () => [
+      { field: "displayName", headerName: "Producto", flex: 1, minWidth: 220 },
+      { field: "categoryName", headerName: "Rubro", width: 130 },
+      { field: "stock", headerName: "Stock", width: 100, type: "number" },
+      {
+        field: "avgCost",
+        headerName: "Costo unit.",
+        width: 130,
+        type: "number",
+        renderCell: ({ value }) => (
+          <Box sx={{ display: "flex", alignItems: "center", height: "100%" }}>
+            <Typography variant="body2">{value > 0 ? formatCurrency(value) : "-"}</Typography>
+          </Box>
+        ),
+      },
+    ],
+    []
   );
 
   const stats = React.useMemo(() => {
@@ -438,6 +514,38 @@ export default function StockControlShow() {
         </Stack>
       )}
 
+      {/* Tabs: control (tabla editable) vs discontinuos (sobrante, solo lectura) */}
+      <Tabs
+        value={activeTab}
+        onChange={handleChangeTab}
+        sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}
+      >
+        <Tab value="control" label="Control" />
+        <Tab
+          value="discontinued"
+          label={discLoaded ? `Discontinuos (${discontinued.length})` : "Discontinuos"}
+        />
+      </Tabs>
+
+      {activeTab === "discontinued" ? (
+        <Box sx={{ flex: 1, width: "100%" }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Productos con stock de este rubro que NO están en el control (sobrante /
+            stock a discontinuar). Solo visualización.
+          </Typography>
+          <DataGrid
+            rows={discontinued}
+            columns={discontinuedColumns}
+            disableRowSelectionOnClick
+            loading={isLoadingDisc}
+            autoHeight
+            pageSizeOptions={[25, 50, 100]}
+            initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+            sx={dataGridSx}
+          />
+        </Box>
+      ) : (
+        <>
       {/* Inline add form — only visible in draft */}
       {control?.status === "draft" && (
         <Stack direction="row" spacing={1} sx={{ mb: 2 }} alignItems="center">
@@ -536,7 +644,7 @@ export default function StockControlShow() {
             columns={columns}
             checkboxSelection
             disableRowSelectionOnClick
-            isRowSelectable={({ row }) => row.stockStatusId === 1 && !row.orderedAt}
+            isRowSelectable={({ row }) => isOrderable(row)}
             rowSelectionModel={selectionModel}
             onRowSelectionModelChange={(model) => setSelectionModel(model)}
             loading={isLoading}
@@ -546,6 +654,8 @@ export default function StockControlShow() {
             sx={dataGridSx}
           />
         </Box>
+      )}
+        </>
       )}
     </PageContainer>
   );

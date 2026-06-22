@@ -1,6 +1,11 @@
 const { pool } = require("../database/config");
 const Setting = require("./Setting");
 
+// Condición 'NUEVA MARCA' (id 4): productos nuevos a prueba. Conviven en la hoja
+// de control con el resto pero NO son elegibles para reposición (no entran a
+// ninguna orden, aunque su estado de stock sea "Generar Pedido").
+const NON_REPLENISHABLE_CONDITION_ID = 4;
+
 class Order {
 
   // ============================================================
@@ -121,7 +126,10 @@ class Order {
          WHERE sc.monthly_control_id = $1
            AND sc.id = ANY($2::int[])
            AND sc.stock_status_id = 1
-           AND sc.ordered_at IS NULL`,
+           AND sc.ordered_at IS NULL
+           -- 'NUEVA MARCA' (productos a prueba) no es reponible: nunca entra a
+           -- una orden aunque su estado sea "Generar Pedido".
+           AND (sc.condition_id IS NULL OR sc.condition_id <> ${NON_REPLENISHABLE_CONDITION_ID})`,
         [monthlyControlId, stockControlIds, isHubControl, targetPct]
       );
       const items = itemsResult.rows;

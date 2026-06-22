@@ -1,12 +1,17 @@
 const { pool } = require("../database/config");
 
 // Fuente de verdad de los umbrales de compliance → stock_status.
-// 3 estados: <70% genera pedido, 70-120% óptimo, >120% sobrestock.
+// 3 estados: < order% genera pedido, [order, overstock] óptimo, > overstock% sobrestock.
 const STOCK_STATUS = {
-  NEED_ORDER: 1, // < 70%   "Generar Pedido"
-  OPTIMAL:    2, // 70–120% "Stock Optimo"
-  OVERSTOCK:  3, // > 120%  "Sobrestock"
+  NEED_ORDER: 1, // "Generar Pedido"
+  OPTIMAL:    2, // "Stock Optimo"
+  OVERSTOCK:  3, // "Sobrestock"
 };
+
+// Defaults históricos de los umbrales. Si app_settings no tiene valores (o son
+// inválidos), se usan estos, conservando el comportamiento previo (70/120).
+const DEFAULT_ORDER_PCT = 70;
+const DEFAULT_OVERSTOCK_PCT = 120;
 
 class StockControl {
 
@@ -19,11 +24,40 @@ class StockControl {
   }
 
   /**
-   * Determina el stock_status_id según compliance.
+   * Lee los umbrales configurables (app_settings) con fallback a los defaults.
+   * Devuelve { orderPct, overstockPct }. Se valida que overstock > order; si no,
+   * se cae a los defaults para no invertir los rangos.
    */
-  static determineStockStatus(compliance) {
-    if (compliance < 70)   return STOCK_STATUS.NEED_ORDER;
-    if (compliance <= 120) return STOCK_STATUS.OPTIMAL;
+  static async getThresholds() {
+    try {
+      const result = await pool.query(
+        "SELECT key, value FROM app_settings WHERE key IN ('stock_threshold_order_pct', 'stock_threshold_overstock_pct')"
+      );
+      const map = {};
+      for (const r of result.rows) map[r.key] = Number(r.value);
+      let orderPct = map.stock_threshold_order_pct;
+      let overstockPct = map.stock_threshold_overstock_pct;
+      if (!Number.isFinite(orderPct)) orderPct = DEFAULT_ORDER_PCT;
+      if (!Number.isFinite(overstockPct)) overstockPct = DEFAULT_OVERSTOCK_PCT;
+      // Coherencia: el de sobrestock debe ser mayor que el de pedido.
+      if (overstockPct <= orderPct) {
+        return { orderPct: DEFAULT_ORDER_PCT, overstockPct: DEFAULT_OVERSTOCK_PCT };
+      }
+      return { orderPct, overstockPct };
+    } catch {
+      return { orderPct: DEFAULT_ORDER_PCT, overstockPct: DEFAULT_OVERSTOCK_PCT };
+    }
+  }
+
+  /**
+   * Determina el stock_status_id según compliance y los umbrales dados.
+   * Los umbrales son parámetros (con defaults históricos 70/120) para que la
+   * firma siga funcionando sin cambios; el caller que quiera los valores
+   * configurables debe pasarlos vía getThresholds().
+   */
+  static determineStockStatus(compliance, orderPct = DEFAULT_ORDER_PCT, overstockPct = DEFAULT_OVERSTOCK_PCT) {
+    if (compliance < orderPct)     return STOCK_STATUS.NEED_ORDER;
+    if (compliance <= overstockPct) return STOCK_STATUS.OPTIMAL;
     return STOCK_STATUS.OVERSTOCK;
   }
 
@@ -105,7 +139,8 @@ class StockControl {
       );
       const stock_current   = stockResult.rows[0].stock;
       const compliance      = StockControl.calculateCompliance(stock_current, stock_require);
-      const stock_status_id = StockControl.determineStockStatus(compliance);
+      const { orderPct, overstockPct } = await StockControl.getThresholds();
+      const stock_status_id = StockControl.determineStockStatus(compliance, orderPct, overstockPct);
 
       const result = await client.query(
         `INSERT INTO stock_controls
@@ -217,6 +252,48 @@ class StockControl {
       [monthly_control_id, product_stock_id]
     );
     return result.rows.length > 0;
+  }
+
+  /**
+   * Productos DISCONTINUOS de un control: los que tienen stock en la sucursal,
+   * pertenecen al MISMO rubro del control, pero NO fueron incluidos en él.
+   * Sirve para detectar sobrante / stock a discontinuar. Solo lectura.
+   *
+   * Reglas (alineadas con getAvailableProducts del catálogo del control):
+   *   - psb de la sucursal del control, con stock > 0.
+   *   - mismo rubro: producto suelto (products.category_id = rubro) o grupo
+   *     (product_groups.category_type = categories.category_name del rubro).
+   *   - NOT EXISTS un stock_control de ESTE control para ese psb.
+   * @param {number} branchId    sucursal del control
+   * @param {number} categoryId  rubro del control
+   * @param {number} monthlyControlId  el control en sí (para excluir sus ítems)
+   */
+  static async findDiscontinued(branchId, categoryId, monthlyControlId) {
+    const result = await pool.query(
+      `SELECT
+         psb.id                                       AS product_stock_id,
+         psb.display_name,
+         psb.stock,
+         COALESCE(psb.avg_cost, 0)                    AS avg_cost,
+         COALESCE(c.category_name, pg.category_type)  AS category_name
+       FROM product_stock_by_branch psb
+       LEFT JOIN products       p  ON psb.product_id = p.id
+       LEFT JOIN categories     c  ON p.category_id  = c.id
+       LEFT JOIN product_groups pg ON psb.group_id   = pg.id
+       LEFT JOIN categories     cg ON pg.category_type = cg.category_name
+       WHERE psb.branch_id = $1
+         AND psb.display_name IS NOT NULL
+         AND psb.stock > 0
+         AND ( p.category_id = $2 OR cg.id = $2 )
+         AND NOT EXISTS (
+           SELECT 1 FROM stock_controls sc
+           WHERE sc.monthly_control_id = $3
+             AND sc.product_stock_id = psb.id
+         )
+       ORDER BY psb.display_name`,
+      [branchId, categoryId, monthlyControlId]
+    );
+    return result.rows;
   }
 }
 

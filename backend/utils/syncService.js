@@ -1,6 +1,7 @@
 const axios = require("axios");
 const { pool } = require("../database/config");
 const { parseProductName, detectGroup, detectBrandInName } = require("./nameParser");
+const StockControl = require("../models/StockControl");
 
 /**
  * Servicio de sincronización con la API externa.
@@ -425,14 +426,16 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
     }
 
     // Actualizar stock_current en controles DRAFT de esta sucursal.
-    // Controles completados no se tocan.
+    // Controles completados no se tocan. Los umbrales de estado vienen de
+    // app_settings (con fallback 70/120) — misma fuente que StockControl.upsert.
+    const { orderPct, overstockPct } = await StockControl.getThresholds();
     await client.query(
       `UPDATE stock_controls
        SET stock_current   = psb.stock,
            stock_status_id = CASE
              WHEN stock_controls.stock_require = 0 THEN 2
-             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) < 70  THEN 1
-             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) <= 120 THEN 2
+             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) < $2  THEN 1
+             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) <= $3 THEN 2
              ELSE 3
            END,
            updated_at      = NOW()
@@ -442,7 +445,7 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
          AND stock_controls.monthly_control_id = mc.id
          AND mc.branch_id = $1
          AND mc.status = 'draft'`,
-      [branch.id],
+      [branch.id, orderPct, overstockPct],
     );
 
     await client.query("COMMIT");

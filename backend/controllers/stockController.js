@@ -94,6 +94,30 @@ const getMonthlyControlById = async (req, res) => {
   }
 };
 
+// GET /api/stock/monthly-control/:control_id/discontinued
+// Productos DISCONTINUOS del control: tienen stock en la sucursal, son del
+// mismo rubro, pero NO fueron incluidos en el control. Solo lectura (no se
+// crea/elimina nada). Sirve para detectar sobrante a discontinuar.
+const getDiscontinued = async (req, res) => {
+  try {
+    const { control_id } = req.params;
+    const control = await MonthlyControl.findById(control_id);
+    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
+    if (!canAccessBranch(req.user, control.branch_id)) {
+      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
+    }
+
+    const products = await StockControl.findDiscontinued(
+      control.branch_id,
+      control.category_id,
+      control.id
+    );
+    res.json({ status: "success", products });
+  } catch (error) {
+    handleControllerError(res, error, "Error obteniendo productos discontinuos:");
+  }
+};
+
 // PUT /api/stock/monthly-control/complete
 const completeMonthlyControl = async (req, res) => {
   try {
@@ -365,6 +389,7 @@ module.exports = {
   createMonthlyControl,
   getCurrentMonthlyControl,
   getMonthlyControlById,
+  getDiscontinued,
   completeMonthlyControl,
   getMonthlyControlHistory,
   deleteMonthlyControl,

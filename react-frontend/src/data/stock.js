@@ -107,6 +107,19 @@ export async function getStockItems(controlId) {
   };
 }
 
+// Productos DISCONTINUOS del control: con stock en la sucursal, del mismo rubro,
+// NO incluidos en el control. Solo lectura (para detectar sobrante).
+export async function getDiscontinuedProducts(controlId) {
+  const data = await stockService.getDiscontinued(controlId);
+  return (data.products || []).map((p) => ({
+    id: p.product_stock_id,
+    displayName: p.display_name,
+    stock: Number(p.stock || 0),
+    avgCost: Number(p.avg_cost || 0),
+    categoryName: p.category_name || "",
+  }));
+}
+
 // Agrega/actualiza un ítem del control. `ref` identifica el producto:
 //   { productStockId } → producto ya presente en la sucursal
 //   { productId } | { groupId } → catálogo global; el backend crea la fila en 0
