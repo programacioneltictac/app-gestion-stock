@@ -165,6 +165,37 @@ const updateItemReceived = async (req, res) => {
   }
 };
 
+// PATCH /api/orders/:id/receive-all
+// Marca todos los items de la orden como recibidos y la deja en 'completed'
+const receiveAll = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const order = await Order.findById(id);
+    if (!order) {
+      return res.status(404).json({ status: "error", message: "Orden no encontrada" });
+    }
+    if (!canAccessBranch(req.user, order.branch_id)) {
+      return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
+    }
+    if (ORDER_STATUSES_TERMINAL.includes(order.status)) {
+      return res.status(400).json({
+        status: "error",
+        message: "No se puede modificar una orden completada o cancelada"
+      });
+    }
+
+    await Order.receiveAll(id);
+    const updated = await Order.findById(id);
+    const items = await Order.findDetailsByOrderId(id);
+
+    console.log(`Orden recibida completa - ID: ${id}, Usuario: ${req.user.username}`);
+    res.json({ status: "success", order: updated, items });
+  } catch (error) {
+    handleControllerError(res, error, "Error marcando orden como recibida:");
+  }
+};
+
 // DELETE /api/orders/:id
 // Elimina una orden y sus items (solo admin/manager)
 const deleteOrder = async (req, res) => {
@@ -197,5 +228,6 @@ module.exports = {
   getOrderDetail,
   updateStatus,
   updateItemReceived,
+  receiveAll,
   deleteOrder,
 };

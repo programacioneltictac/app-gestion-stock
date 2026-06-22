@@ -1,4 +1,5 @@
 const { pool } = require("../database/config");
+const Setting = require("./Setting");
 
 class Order {
 
@@ -13,7 +14,8 @@ class Order {
    *
    * NODO HUB: antes de pedir al proveedor (orden EXTERNA), cubre el faltante con
    * stock del Hub via una orden INTERNA. Por cada item:
-   *   faltante     = GREATEST(stock_require - stock_current, 1)
+   *   objetivo     = ceil(stock_require * replenish_target_pct / 100)  (config, def 70%)
+   *   faltante     = GREATEST(objetivo - stock_current, 1)
    *   cubrible_hub = min(faltante, disponible_hub)   -> orden interna
    *   resto        = faltante - cubrible_hub          -> orden externa
    * donde disponible_hub = stock del Hub del mismo product_id/group_id MENOS lo
@@ -34,6 +36,12 @@ class Order {
     if (!Array.isArray(stockControlIds) || stockControlIds.length === 0) {
       throw new Error("Debe seleccionar al menos un item para generar la orden");
     }
+
+    // % objetivo de reposicion (configurable). La orden repone hasta ese % del
+    // stock_require, no hasta el 100%. Default 70 (piso del rango optimo). Se
+    // acota a [1, 100] para no generar pedidos negativos o desproporcionados.
+    const rawPct = await Setting.getNumber("replenish_target_pct", 70);
+    const targetPct = Math.min(100, Math.max(1, rawPct));
 
     const client = await pool.connect();
     try {
@@ -57,9 +65,19 @@ class Order {
       // El Hub no se autoabastece: si el control es de la propia sucursal Hub,
       // o no hay Hub configurado, no hay particion (todo va a externa).
       const useHub = hubBranchId && hubBranchId !== control.branch_id;
+      // ¿Este control es del PROPIO Hub? Si lo es, el faltante debe contemplar lo
+      // que el Hub ya tiene comprometido a otras sucursales (reservado por ordenes
+      // internas abiertas): la "Dif." del control muestra el disponible NETO
+      // (stock - requerido - comprometido), y la orden de reposicion del Hub debe
+      // pedir hasta cubrir ese neto, no solo stock_require - stock_current.
+      const isHubControl = hubBranchId && hubBranchId === control.branch_id;
 
       // Cargar los items pedibles seleccionados con su faltante y la referencia
       // de catalogo (product_id/group_id) para cruzar contra el stock del Hub.
+      // En el control del propio Hub, el faltante suma lo comprometido (reservado
+      // por ordenes internas abiertas sobre ESTE mismo psb) para que la orden
+      // reponga el disponible neto. En el resto de sucursales, $3=false y el
+      // termino se anula (suma 0).
       const itemsResult = await client.query(
         `SELECT
            sc.id                                          AS stock_control_id,
@@ -67,7 +85,18 @@ class Order {
            psb.display_name,
            psb.product_id,
            psb.group_id,
-           GREATEST(sc.stock_require - sc.stock_current, 1) AS faltante,
+           GREATEST(
+             CEIL(sc.stock_require * $4::numeric / 100) - sc.stock_current
+               + CASE WHEN $3 THEN COALESCE((
+                   SELECT SUM(od.quantity_ordered)
+                   FROM order_details od
+                   JOIN orders_controls oc ON od.order_control_id = oc.id
+                   WHERE oc.order_type = 'internal'
+                     AND oc.status <> 'cancelled'
+                     AND od.product_stock_id = sc.product_stock_id
+                 ), 0) ELSE 0 END,
+             1
+           )                                              AS faltante,
            COALESCE(psb.avg_cost, 0)                      AS unit_cost
          FROM stock_controls sc
          JOIN product_stock_by_branch psb ON sc.product_stock_id = psb.id
@@ -75,7 +104,7 @@ class Order {
            AND sc.id = ANY($2::int[])
            AND sc.stock_status_id = 1
            AND sc.ordered_at IS NULL`,
-        [monthlyControlId, stockControlIds]
+        [monthlyControlId, stockControlIds, isHubControl, targetPct]
       );
       const items = itemsResult.rows;
 
@@ -425,6 +454,44 @@ class Order {
 
       await client.query("COMMIT");
       return detail.order_control_id;
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Marca TODOS los items de una orden como recibidos en su totalidad
+   * (quantity_received = quantity_ordered) en una sola transaccion y deja la
+   * orden en 'completed'. Atomico: una sola llamada en vez de N por item.
+   */
+  static async receiveAll(orderId) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      await client.query(
+        `UPDATE order_details
+         SET quantity_received = quantity_ordered,
+             cost_estimate     = unit_cost * quantity_ordered,
+             updated_at        = NOW()
+         WHERE order_control_id = $1
+           AND quantity_received < quantity_ordered`,
+        [orderId]
+      );
+
+      await Order.recalcCostEstimate(orderId, client);
+
+      await client.query(
+        `UPDATE orders_controls
+         SET status = 'completed', updated_at = NOW()
+         WHERE id = $1`,
+        [orderId]
+      );
+
+      await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK");
       throw err;

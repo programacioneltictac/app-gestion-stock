@@ -69,6 +69,10 @@ app.use("/api/orders", authenticateToken, orderRoutes);
 const supplierRoutes = require("./routes/suppliers");
 app.use("/api/suppliers", supplierRoutes);
 
+// Rutas de configuración global (app_settings)
+const settingRoutes = require("./routes/settings");
+app.use("/api/settings", settingRoutes);
+
 // ==================== MANEJO DE ERRORES ====================
 
 app.use(notFoundHandler);
