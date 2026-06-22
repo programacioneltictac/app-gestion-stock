@@ -93,7 +93,34 @@ class MonthlyControl {
                   WHEN sc.stock_require = 0 THEN 100
                   ELSE (sc.stock_current::numeric / sc.stock_require::numeric) * 100
                 END
-              ), 2) as avg_compliance
+              ), 2) as avg_compliance,
+              -- Stock valorizado total del rubro en la sucursal: SUM(stock * costo)
+              -- de TODOS los productos del rubro con stock > 0 (en control +
+              -- discontinuos). Costo con fallback (avg_cost local -> cost_price ->
+              -- promedio del grupo en otras sucursales), como en las órdenes.
+              -- Subconsulta correlacionada por mc.branch_id + mc.category_id; no
+              -- depende de qué se cargó en el control.
+              COALESCE((
+                SELECT SUM(
+                  psb.stock * COALESCE(
+                    NULLIF(psb.avg_cost, 0),
+                    p2.cost_price,
+                    CASE WHEN psb.group_id IS NOT NULL THEN (
+                      SELECT AVG(o.avg_cost)
+                      FROM product_stock_by_branch o
+                      WHERE o.group_id = psb.group_id AND o.avg_cost > 0
+                    ) END,
+                    0
+                  )
+                )
+                FROM product_stock_by_branch psb
+                LEFT JOIN products p2 ON psb.product_id = p2.id
+                LEFT JOIN product_groups pg2 ON psb.group_id = pg2.id
+                LEFT JOIN categories cg2 ON pg2.category_type = cg2.category_name
+                WHERE psb.branch_id = mc.branch_id
+                  AND psb.stock > 0
+                  AND ( p2.category_id = mc.category_id OR cg2.id = mc.category_id )
+              ), 0) as stock_value
        FROM monthly_controls mc
        LEFT JOIN branches b ON mc.branch_id = b.id
        LEFT JOIN categories c ON mc.category_id = c.id

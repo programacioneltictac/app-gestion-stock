@@ -31,6 +31,9 @@ function transformControlFromBackend(control) {
       Number(control.excess_items || control.products_excess || 0) +
       Number(control.high_excess_items || control.products_high_excess || 0),
     avgCompliance: Number(control.avg_compliance || 0),
+    // Stock valorizado total del rubro en la sucursal (control + discontinuos).
+    // Solo lo trae getHistory; en otros endpoints viene undefined.
+    stockValue: control.stock_value != null ? Number(control.stock_value) : null,
     createdAt: control.created_at,
     completedAt: control.completed_at,
   };

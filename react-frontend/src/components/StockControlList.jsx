@@ -30,6 +30,9 @@ import { getBranchesList } from "../data/branches";
 import PageContainer from "./PageContainer";
 import ActionButton from "./ActionButton";
 
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value || 0);
+
 export default function StockControlList() {
   const { branchId } = useParams();
   const navigate = useNavigate();
@@ -214,6 +217,19 @@ export default function StockControlList() {
           if (!value) return "";
           return new Date(value).toLocaleDateString("es-ES");
         },
+      },
+      {
+        field: "stockValue",
+        headerName: "Stock valorizado",
+        width: 160,
+        type: "number",
+        // Σ(stock × costo) de todo el rubro con stock en la sucursal (productos
+        // en control + discontinuos). Lo calcula el backend (getHistory).
+        renderCell: ({ value }) => (
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "flex-end", height: "100%", width: "100%" }}>
+            {value != null ? formatCurrency(value) : "—"}
+          </Box>
+        ),
       },
       {
         field: "actions",
