@@ -73,6 +73,10 @@ app.use("/api/suppliers", supplierRoutes);
 const settingRoutes = require("./routes/settings");
 app.use("/api/settings", settingRoutes);
 
+// Rutas de alertas tempranas (panel del dashboard)
+const alertRoutes = require("./routes/alerts");
+app.use("/api/alerts", authenticateToken, alertRoutes);
+
 // ==================== MANEJO DE ERRORES ====================
 
 app.use(notFoundHandler);
