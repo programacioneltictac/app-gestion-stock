@@ -97,9 +97,27 @@ class Order {
                  ), 0) ELSE 0 END,
              1
            )                                              AS faltante,
-           COALESCE(psb.avg_cost, 0)                      AS unit_cost
+           -- Costo unitario con FALLBACK para evitar $0 cuando la sucursal no
+           -- tiene costo propio (producto sin stock local => avg_cost 0/NULL):
+           --   1) avg_cost de la sucursal (costo real local), si > 0
+           --   2) productos individuales: products.cost_price (catalogo global)
+           --   3) grupos: promedio del avg_cost de ESE grupo en otras sucursales
+           --      que si tengan costo (> 0)
+           --   4) 0 si no hay ningun dato de costo en ningun lado
+           COALESCE(
+             NULLIF(psb.avg_cost, 0),
+             p.cost_price,
+             CASE WHEN psb.group_id IS NOT NULL THEN (
+               SELECT AVG(other.avg_cost)
+               FROM product_stock_by_branch other
+               WHERE other.group_id = psb.group_id
+                 AND other.avg_cost > 0
+             ) END,
+             0
+           )                                              AS unit_cost
          FROM stock_controls sc
          JOIN product_stock_by_branch psb ON sc.product_stock_id = psb.id
+         LEFT JOIN products p ON psb.product_id = p.id
          WHERE sc.monthly_control_id = $1
            AND sc.id = ANY($2::int[])
            AND sc.stock_status_id = 1
@@ -299,12 +317,15 @@ class Order {
               b.code        AS branch_code,
               sb.name       AS source_branch_name,
               u.username    AS created_by_username,
-              mc.status     AS source_control_status
+              mc.status     AS source_control_status,
+              mc.category_id,
+              cat.category_name
        FROM orders_controls oc
-       LEFT JOIN branches         b  ON oc.branch_id          = b.id
-       LEFT JOIN branches         sb ON oc.source_branch_id   = sb.id
-       LEFT JOIN users            u  ON oc.created_by         = u.id
-       LEFT JOIN monthly_controls mc ON oc.monthly_control_id = mc.id
+       LEFT JOIN branches         b   ON oc.branch_id          = b.id
+       LEFT JOIN branches         sb  ON oc.source_branch_id   = sb.id
+       LEFT JOIN users            u   ON oc.created_by         = u.id
+       LEFT JOIN monthly_controls mc  ON oc.monthly_control_id = mc.id
+       LEFT JOIN categories       cat ON mc.category_id        = cat.id
        WHERE oc.id = $1`,
       [id]
     );
@@ -394,6 +415,8 @@ class Order {
          psb.stock          AS stock_current,
          psb.avg_cost       AS current_avg_cost,
          COALESCE(c.category_name, pg.category_type) AS category_name,
+         sc.condition_id,
+         cond.condition_name,
          od.updated_at
        FROM order_details od
        LEFT JOIN product_stock_by_branch psb ON od.product_stock_id = psb.id
@@ -401,6 +424,8 @@ class Order {
        LEFT JOIN categories    c   ON p.category_id  = c.id
        LEFT JOIN product_groups pg ON psb.group_id   = pg.id
        LEFT JOIN suppliers     sup ON od.supplier_id = sup.id
+       LEFT JOIN stock_controls sc ON od.stock_control_id = sc.id
+       LEFT JOIN conditions    cond ON sc.condition_id = cond.id
        WHERE od.order_control_id = $1
        ORDER BY od.display_name`,
       [orderId]
