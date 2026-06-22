@@ -6,6 +6,7 @@ import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Autocomplete from '@mui/material/Autocomplete';
 import IconButton from '@mui/material/IconButton';
+import Checkbox from '@mui/material/Checkbox';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
@@ -15,6 +16,8 @@ import { dataGridSx } from './dataGridStyles';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
+import DoneAllIcon from '@mui/icons-material/DoneAll';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import { useParams, useNavigate } from 'react-router';
 import { useDialogs } from '../hooks/useDialogs/useDialogs';
 import useNotifications from '../hooks/useNotifications/useNotifications';
@@ -23,6 +26,7 @@ import {
   getOrderDetail,
   updateOrderStatus,
   updateOrderItemReceived,
+  receiveAllOrderItems,
   deleteOrder,
   getOrderStatusLabel,
   getOrderStatusColor,
@@ -30,6 +34,7 @@ import {
   ORDER_STATUS_OPTIONS,
 } from '../data/orders';
 import PageContainer from './PageContainer';
+import { exportOrderToExcel } from '../utils/orderExcel';
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(value);
@@ -106,6 +111,7 @@ export default function OrderShow() {
   }, [loadData]);
 
   const isOrderEditable = order && ORDER_STATUSES_EDITABLE.includes(order.status);
+  const hasPendingItems = items.some((it) => it.quantityReceived < it.quantityOrdered);
 
   const handleSaveStatus = React.useCallback(async () => {
     if (!order || newStatus === order.status) return;
@@ -141,9 +147,109 @@ export default function OrderShow() {
     setIsSavingItem(false);
   }, [editingQty, notifications]);
 
+  // Check de "recibido completo": marca el item como recibido en su totalidad
+  // (quantityReceived = quantityOrdered) o lo vuelve a 0 al desmarcar. Reusa el
+  // mismo endpoint que la carga parcial.
+  const handleToggleReceived = React.useCallback(async (item) => {
+    const target = item.quantityReceived >= item.quantityOrdered ? 0 : item.quantityOrdered;
+    setIsSavingItem(true);
+    try {
+      const { order: updatedOrder, items: updatedItems } = await updateOrderItemReceived(item.id, target);
+      setOrder(updatedOrder);
+      setItems(updatedItems);
+      setEditingItemId(null);
+    } catch (err) {
+      notifications.show(`Error: ${err.message}`, { severity: 'error', autoHideDuration: 4000 });
+    }
+    setIsSavingItem(false);
+  }, [notifications]);
+
+  const [isReceivingAll, setIsReceivingAll] = React.useState(false);
+
+  // Marca toda la orden como recibida (todos los items en su totalidad) y la
+  // deja en 'completed'. Una sola llamada atomica al backend.
+  const handleReceiveAll = React.useCallback(async () => {
+    if (!order) return;
+    const confirmed = await dialogs.confirm(
+      `¿Marcar todos los items de la orden #${order.id} como recibidos? La orden quedará completada.`,
+      {
+        title: 'Marcar todo recibido',
+        severity: 'success',
+        okText: 'Marcar todo',
+        cancelText: 'Cancelar',
+      }
+    );
+    if (!confirmed) return;
+    setIsReceivingAll(true);
+    try {
+      const { order: updatedOrder, items: updatedItems } = await receiveAllOrderItems(order.id);
+      setOrder(updatedOrder);
+      setItems(updatedItems);
+      notifications.show('Orden marcada como recibida', { severity: 'success', autoHideDuration: 3000 });
+    } catch (err) {
+      notifications.show(`Error: ${err.message}`, { severity: 'error', autoHideDuration: 4000 });
+    }
+    setIsReceivingAll(false);
+  }, [order, dialogs, notifications]);
+
+  const handleDownloadExcel = React.useCallback(async () => {
+    if (!order) return;
+    try {
+      await exportOrderToExcel(order, items);
+    } catch (err) {
+      notifications.show(`Error al generar el Excel: ${err.message}`, { severity: 'error', autoHideDuration: 4000 });
+    }
+  }, [order, items, notifications]);
+
   const columns = React.useMemo(
     () => [
-      { field: 'displayName', headerName: 'Producto', flex: 1, minWidth: 220 },
+      {
+        field: 'done',
+        headerName: '',
+        width: 56,
+        sortable: false,
+        filterable: false,
+        disableColumnMenu: true,
+        align: 'center',
+        headerAlign: 'center',
+        renderCell: ({ row }) => {
+          const isDone = row.quantityReceived >= row.quantityOrdered;
+          return (
+            <Tooltip title={isDone ? 'Recibido completo — clic para desmarcar' : 'Marcar como recibido completo'} enterDelay={600}>
+              <span>
+                <Checkbox
+                  size="small"
+                  color="success"
+                  checked={isDone}
+                  disabled={!isOrderEditable || isSavingItem}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={() => handleToggleReceived(row)}
+                />
+              </span>
+            </Tooltip>
+          );
+        },
+      },
+      {
+        field: 'displayName',
+        headerName: 'Producto',
+        flex: 1,
+        minWidth: 220,
+        renderCell: ({ row, value }) => {
+          const isDone = row.quantityReceived >= row.quantityOrdered;
+          return (
+            <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+              <Typography
+                variant="body2"
+                sx={{ textDecoration: isDone ? 'line-through' : 'none' }}
+                color={isDone ? 'text.disabled' : 'text.primary'}
+              >
+                {value}
+              </Typography>
+            </Box>
+          );
+        },
+      },
       { field: 'categoryName', headerName: 'Rubro', width: 120 },
       // Proveedor: solo relevante en órdenes externas (las internas van al Hub).
       ...(order && !order.isInternal
@@ -246,7 +352,7 @@ export default function OrderShow() {
         ),
       },
     ],
-    [editingItemId, editingQty, isSavingItem, isOrderEditable, handleEditItem, handleSaveItemReceived, order]
+    [editingItemId, editingQty, isSavingItem, isOrderEditable, handleEditItem, handleSaveItemReceived, handleToggleReceived, order]
   );
 
   if (isLoading) {
@@ -273,7 +379,26 @@ export default function OrderShow() {
         { title: `Orden #${order?.id}` },
       ]}
       actions={
-        <Stack direction="row" spacing={1}>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Tooltip title="Descargar Excel" enterDelay={600}>
+            <span>
+              <IconButton size="small" color="primary" onClick={handleDownloadExcel} disabled={items.length === 0}>
+                <FileDownloadIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
+          {isOrderEditable && hasPendingItems && (
+            <Button
+              size="small"
+              variant="outlined"
+              color="success"
+              startIcon={isReceivingAll ? <CircularProgress size={16} color="inherit" /> : <DoneAllIcon />}
+              onClick={handleReceiveAll}
+              disabled={isReceivingAll}
+            >
+              Marcar todo recibido
+            </Button>
+          )}
           {canDelete && (
             <Tooltip title="Eliminar orden" enterDelay={1000}>
               <IconButton size="small" color="error" onClick={handleDelete}>
@@ -359,7 +484,13 @@ export default function OrderShow() {
           autoHeight
           pageSizeOptions={[25, 50, 100]}
           initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
-          sx={dataGridSx}
+          getRowClassName={(params) =>
+            params.row.quantityReceived >= params.row.quantityOrdered ? 'row--received' : ''
+          }
+          sx={{
+            ...dataGridSx,
+            '& .row--received': { opacity: 0.55 },
+          }}
         />
       </Box>
 

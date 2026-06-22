@@ -9,6 +9,7 @@ function transformBranchFromBackend(branch) {
     address: branch.address || '',
     phone: branch.phone || '',
     isActive: branch.is_active,
+    isHub: branch.is_hub === true,
   };
 }
 

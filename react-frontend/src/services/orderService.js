@@ -28,6 +28,10 @@ class OrderService {
     return apiClient.patch(`/orders/items/${detailId}/received`, { quantity_received: quantityReceived, notes });
   }
 
+  async receiveAll(orderId) {
+    return apiClient.patch(`/orders/${orderId}/receive-all`);
+  }
+
   async deleteOrder(orderId) {
     return apiClient.delete(`/orders/${orderId}`);
   }

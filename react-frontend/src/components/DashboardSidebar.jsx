@@ -5,16 +5,19 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import Box from "@mui/material/Box";
 import Drawer from "@mui/material/Drawer";
 import List from "@mui/material/List";
+import Divider from "@mui/material/Divider";
 import Toolbar from "@mui/material/Toolbar";
 
 import DashboardIcon from "@mui/icons-material/Dashboard";
 import InventoryIcon from "@mui/icons-material/Inventory";
 import AssessmentIcon from "@mui/icons-material/Assessment";
 import StoreIcon from "@mui/icons-material/Store";
+import WarehouseIcon from "@mui/icons-material/Warehouse";
 import PeopleIcon from "@mui/icons-material/People";
 import LabelIcon from "@mui/icons-material/Label";
 import LocalShippingIcon from "@mui/icons-material/LocalShipping";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
+import SettingsIcon from "@mui/icons-material/Settings";
 import { matchPath, useLocation } from "react-router";
 import DashboardSidebarContext from "../context/DashboardSidebarContext";
 import { DRAWER_WIDTH, MINI_DRAWER_WIDTH } from "../constants";
@@ -180,16 +183,35 @@ function DashboardSidebar({
                     minWidth: 240,
                   }}
                 >
-                  {branches.map((branch) => (
-                    <DashboardSidebarPageItem
-                      key={branch.id}
-                      id={`stock-branch-${branch.id}`}
-                      title={branch.name}
-                      icon={<StoreIcon fontSize="small" />}
-                      href={`/stock-control/${branch.id}`}
-                      selected={!!matchPath(`/stock-control/${branch.id}/*`, pathname)}
-                    />
-                  ))}
+                  {/* Nodo Hub (deposito de abastecimiento) primero y separado del
+                      resto de sucursales, para tenerlo siempre a mano. */}
+                  {branches
+                    .filter((b) => b.isHub)
+                    .map((branch) => (
+                      <DashboardSidebarPageItem
+                        key={branch.id}
+                        id={`stock-branch-${branch.id}`}
+                        title={branch.name}
+                        icon={<WarehouseIcon fontSize="small" />}
+                        href={`/stock-control/${branch.id}`}
+                        selected={!!matchPath(`/stock-control/${branch.id}/*`, pathname)}
+                      />
+                    ))}
+                  {branches.some((b) => b.isHub) && branches.some((b) => !b.isHub) && (
+                    <Divider component="li" sx={{ my: 0.5, mx: 1 }} />
+                  )}
+                  {branches
+                    .filter((b) => !b.isHub)
+                    .map((branch) => (
+                      <DashboardSidebarPageItem
+                        key={branch.id}
+                        id={`stock-branch-${branch.id}`}
+                        title={branch.name}
+                        icon={<StoreIcon fontSize="small" />}
+                        href={`/stock-control/${branch.id}`}
+                        selected={!!matchPath(`/stock-control/${branch.id}/*`, pathname)}
+                      />
+                    ))}
                 </List>
               }
             />
@@ -226,6 +248,13 @@ function DashboardSidebar({
                   icon={<PeopleIcon />}
                   href="/users"
                   selected={!!matchPath("/users/*", pathname)}
+                />
+                <DashboardSidebarPageItem
+                  id="settings"
+                  title="Configuración"
+                  icon={<SettingsIcon />}
+                  href="/settings"
+                  selected={!!matchPath("/settings/*", pathname)}
                 />
               </>
             )}

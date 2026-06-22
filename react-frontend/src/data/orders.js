@@ -114,6 +114,14 @@ export async function updateOrderItemReceived(detailId, quantityReceived, notes 
   };
 }
 
+export async function receiveAllOrderItems(orderId) {
+  const data = await orderService.receiveAll(orderId);
+  return {
+    order: transformOrderFromBackend(data.order),
+    items: (data.items || []).map(transformOrderItemFromBackend),
+  };
+}
+
 export async function deleteOrder(orderId) {
   await orderService.deleteOrder(orderId);
 }

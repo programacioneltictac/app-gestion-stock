@@ -6,6 +6,7 @@ import Dashboard from "../components/Dashboard";
 import ProductList from "../components/ProductList";
 import BrandList from "../components/BrandList";
 import SupplierList from "../components/SupplierList";
+import SettingsPage from "../components/SettingsPage";
 import StockControlList from "../components/StockControlList";
 import StockControlShow from "../components/StockControlShow";
 import OrderList from "../components/OrderList";
@@ -70,6 +71,15 @@ const router = createHashRouter([
       {
         path: "/suppliers",
         Component: SupplierList,
+      },
+      // Settings (configuración global) — solo admin
+      {
+        path: "/settings",
+        element: (
+          <ProtectedRoute requiredRoles={["admin"]}>
+            <SettingsPage />
+          </ProtectedRoute>
+        ),
       },
       // Users routes
       {

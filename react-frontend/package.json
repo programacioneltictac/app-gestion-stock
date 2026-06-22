@@ -17,6 +17,7 @@
     "@mui/x-data-grid": "^7.3.4",
     "@mui/x-date-pickers": "^7.3.4",
     "dayjs": "^1.11.10",
+    "exceljs": "^4.4.0",
     "prop-types": "^15.8.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
