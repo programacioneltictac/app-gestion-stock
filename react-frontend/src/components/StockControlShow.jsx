@@ -433,7 +433,7 @@ export default function StockControlShow() {
   );
 
   // Columnas de la tabla de discontinuos (solo lectura): Producto, Rubro,
-  // Stock, Costo unit.
+  // Stock, Costo unit., Total valorizado (= stock * costo unit.).
   const discontinuedColumns = React.useMemo(
     () => [
       { field: "displayName", headerName: "Producto", flex: 1, minWidth: 220 },
@@ -447,6 +447,21 @@ export default function StockControlShow() {
         renderCell: ({ value }) => (
           <Box sx={{ display: "flex", alignItems: "center", height: "100%" }}>
             <Typography variant="body2">{value > 0 ? formatCurrency(value) : "-"}</Typography>
+          </Box>
+        ),
+      },
+      {
+        field: "totalValue",
+        headerName: "Total valorizado",
+        width: 150,
+        type: "number",
+        // stock * costo unit. (del sync). Se calcula de la fila, no viene del backend.
+        valueGetter: (_value, row) => (Number(row.stock) || 0) * (Number(row.avgCost) || 0),
+        renderCell: ({ value }) => (
+          <Box sx={{ display: "flex", alignItems: "center", height: "100%" }}>
+            <Typography variant="body2" fontWeight={500}>
+              {value > 0 ? formatCurrency(value) : "-"}
+            </Typography>
           </Box>
         ),
       },
