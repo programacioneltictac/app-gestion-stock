@@ -17,6 +17,7 @@ import PeopleIcon from "@mui/icons-material/People";
 import LabelIcon from "@mui/icons-material/Label";
 import LocalShippingIcon from "@mui/icons-material/LocalShipping";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
+import ScienceIcon from "@mui/icons-material/Science";
 import SettingsIcon from "@mui/icons-material/Settings";
 import { matchPath, useLocation } from "react-router";
 import DashboardSidebarContext from "../context/DashboardSidebarContext";
@@ -165,6 +166,15 @@ function DashboardSidebar({
               href="/orders"
               selected={!!matchPath('/orders/*', pathname)}
             />
+            {(user?.role === 'admin' || user?.role === 'manager') && (
+              <DashboardSidebarPageItem
+                id="brand-trials"
+                title="Marcas a prueba"
+                icon={<ScienceIcon />}
+                href="/brand-trials"
+                selected={!!matchPath('/brand-trials/*', pathname)}
+              />
+            )}
             <DashboardSidebarPageItem
               id="stock-control"
               title="Stock Prioritario"

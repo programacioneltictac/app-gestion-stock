@@ -1,4 +1,5 @@
 const { pool } = require("../database/config");
+const BrandTrial = require("./BrandTrial");
 
 // Condición 'MUY PRIORITARIO' (conditions id 3): faltantes de máxima urgencia.
 const MUY_PRIORITARIO_CONDITION_ID = 3;
@@ -23,7 +24,8 @@ class Alert {
    * limita todo a esa sucursal; si es null (admin/manager), abarca todas.
    * Solo considera controles ABIERTOS (draft) e ítems no pedidos.
    * @returns {Promise<object>} { muyPrioritarios, criticalBranches,
-   *   pendingOrders, discontinuedValue }
+   *   pendingOrders, authorizedOrders, avgOrderAgeDays, openOrdersTotal,
+   *   avgCompliance, brandTrialsDue, discontinuedValue }
    */
   static async getSummary(branchId = null) {
     const branchClause = branchId ? "AND mc.branch_id = $1" : "";
@@ -80,6 +82,26 @@ class Alert {
       params
     );
 
+    // 3b) Órdenes autorizadas (status = 'autorizado'): listas para enviar al
+    //     proveedor. Mismo criterio de sucursal que las pendientes.
+    const authorizedOrders = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM orders_controls oc
+       WHERE oc.status = 'autorizado' ${ordersBranchClause}`,
+      params
+    );
+
+    // 3c) Antigüedad promedio (en días) de las órdenes EN GESTIÓN (no finalizadas
+    //     ni canceladas). Al cerrarse/cancelarse una orden deja de contar. Se
+    //     mide hoy - created_at sobre las abiertas.
+    const avgOrderAge = await pool.query(
+      `SELECT ROUND(AVG(EXTRACT(EPOCH FROM (NOW() - oc.created_at)) / 86400))::int AS avg_days,
+              COUNT(*) AS open_total
+       FROM orders_controls oc
+       WHERE oc.status NOT IN ('finalizado', 'cancelado') ${ordersBranchClause}`,
+      params
+    );
+
     // 4) Discontinuos valorizados por sucursal+rubro: stock*costo de productos
     //    del rubro CON stock que NO están en el control draft (sobrante a
     //    liquidar). Navega al control (tab Discontinuos).
@@ -110,10 +132,34 @@ class Alert {
       params
     );
 
+    // 5) Compliance promedio general: AVG del compliance de TODOS los items de
+    //    controles draft (todas las sucursales y rubros). Misma fórmula que
+    //    MonthlyControl.avg_compliance (require=0 => 100). Foto del estado actual.
+    const avgCompliance = await pool.query(
+      `SELECT ROUND(AVG(
+                CASE
+                  WHEN sc.stock_require = 0 THEN 100
+                  ELSE (sc.stock_current::numeric / sc.stock_require::numeric) * 100
+                END
+              ))::int AS avg_compliance
+       FROM stock_controls sc
+       JOIN monthly_controls mc ON sc.monthly_control_id = mc.id
+       WHERE mc.status = 'draft' ${branchClause}`,
+      params
+    );
+
+    // 6) Marcas a prueba vencidas sin decidir (pendientes de evaluación).
+    const brandTrialsDue = await BrandTrial.countDue(branchId);
+
     return {
       muyPrioritarios: muyPrioritarios.rows,
       criticalBranches: criticalBranches.rows,
       pendingOrders: Number(pendingOrders.rows[0]?.total || 0),
+      authorizedOrders: Number(authorizedOrders.rows[0]?.total || 0),
+      avgOrderAgeDays: avgOrderAge.rows[0]?.avg_days != null ? Number(avgOrderAge.rows[0].avg_days) : null,
+      openOrdersTotal: Number(avgOrderAge.rows[0]?.open_total || 0),
+      avgCompliance: avgCompliance.rows[0]?.avg_compliance != null ? Number(avgCompliance.rows[0].avg_compliance) : null,
+      brandTrialsDue,
       discontinuedValue: discontinuedValue.rows,
     };
   }

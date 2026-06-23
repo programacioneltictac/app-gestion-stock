@@ -302,6 +302,15 @@ const getAvailableProducts = async (req, res) => {
         WHERE psb.branch_id = $1
           AND psb.display_name IS NOT NULL
           AND ( p.category_id = $2 OR cg.id = $2 )
+          -- Excluir marcas con prueba EN PRUEBA en esta sucursal/rubro: se
+          -- gestionan en "Marcas a prueba", no se suman al control todavia.
+          AND NOT EXISTS (
+            SELECT 1 FROM brand_trials bt
+            WHERE bt.status = 'en_prueba'
+              AND bt.branch_id = psb.branch_id
+              AND bt.brand_id = COALESCE(pg.brand_id, p.brand_id)
+              AND (bt.category_id IS NULL OR bt.category_id = $2)
+          )
         ORDER BY psb.display_name`,
       [branch_id, category_id]
     );

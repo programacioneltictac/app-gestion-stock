@@ -18,6 +18,11 @@ export async function getAlerts() {
       needOrderItems: Number(r.need_order_items || 0),
     })),
     pendingOrders: Number(data.pendingOrders || 0),
+    authorizedOrders: Number(data.authorizedOrders || 0),
+    avgOrderAgeDays: data.avgOrderAgeDays != null ? Number(data.avgOrderAgeDays) : null,
+    openOrdersTotal: Number(data.openOrdersTotal || 0),
+    avgCompliance: data.avgCompliance != null ? Number(data.avgCompliance) : null,
+    brandTrialsDue: Number(data.brandTrialsDue || 0),
     discontinuedValue: (data.discontinuedValue || []).map((r) => ({
       controlId: r.control_id,
       branchId: r.branch_id,

@@ -205,7 +205,7 @@ class StockControl {
            FROM order_details od
            JOIN orders_controls oc ON od.order_control_id = oc.id
            WHERE od.stock_control_id = sc.id
-             AND oc.status <> 'cancelled'
+             AND oc.status <> 'cancelado'
          )                                                       AS order_dest,
          -- Comprometido (solo relevante en el control del Hub): unidades de este
          -- mismo psb reservadas por ordenes internas abiertas de otras sucursales.
@@ -214,7 +214,7 @@ class StockControl {
            FROM order_details od
            JOIN orders_controls oc ON od.order_control_id = oc.id
            WHERE oc.order_type = 'internal'
-             AND oc.status <> 'cancelled'
+             AND oc.status <> 'cancelado'
              AND od.product_stock_id = sc.product_stock_id
          ), 0)                                                   AS committed
        FROM stock_controls sc
@@ -289,6 +289,15 @@ class StockControl {
            SELECT 1 FROM stock_controls sc
            WHERE sc.monthly_control_id = $3
              AND sc.product_stock_id = psb.id
+         )
+         -- Excluir marcas con una prueba EN PRUEBA en esta sucursal/rubro: se
+         -- gestionan aparte (Marcas a prueba), no son discontinuo todavia.
+         AND NOT EXISTS (
+           SELECT 1 FROM brand_trials bt
+           WHERE bt.status = 'en_prueba'
+             AND bt.branch_id = psb.branch_id
+             AND bt.brand_id = COALESCE(pg.brand_id, p.brand_id)
+             AND (bt.category_id IS NULL OR bt.category_id = $2)
          )
        ORDER BY psb.display_name`,
       [branchId, categoryId, monthlyControlId]

@@ -69,6 +69,10 @@ app.use("/api/orders", authenticateToken, orderRoutes);
 const supplierRoutes = require("./routes/suppliers");
 app.use("/api/suppliers", supplierRoutes);
 
+// Rutas de marcas a prueba (ciclo de vida de marcas nuevas)
+const brandTrialRoutes = require("./routes/brandTrials");
+app.use("/api/brand-trials", brandTrialRoutes);
+
 // Rutas de configuración global (app_settings)
 const settingRoutes = require("./routes/settings");
 app.use("/api/settings", settingRoutes);
