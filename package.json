@@ -4,12 +4,12 @@
   "description": "Sistema de gestion de stock (backend Express + frontend React servido por Express en produccion)",
   "scripts": {
     "start": "node backend/server.js",
-    "build": "npm install --prefix backend && npm install --prefix react-frontend && npm run build --prefix react-frontend",
+    "build": "npm install --prefix backend && npm install --include=dev --prefix react-frontend && npm run build --prefix react-frontend",
     "dev:backend": "npm run dev --prefix backend",
     "dev:frontend": "npm run dev --prefix react-frontend"
   },
   "engines": {
-    "node": ">=18"
+    "node": "22.x"
   },
   "license": "ISC"
 }
