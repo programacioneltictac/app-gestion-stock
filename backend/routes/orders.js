@@ -17,6 +17,9 @@ router.patch("/:id/status", orderController.updateStatus);
 // PATCH  /api/orders/items/:detail_id/received — registrar cantidad recibida de un item
 router.patch("/items/:detail_id/received", orderController.updateItemReceived);
 
+// DELETE /api/orders/items/:detail_id    — borrar un item de la orden (admin/manager)
+router.delete("/items/:detail_id", orderController.deleteDetail);
+
 // PATCH  /api/orders/:id/receive-all     — marcar todos los items como recibidos
 router.patch("/:id/receive-all", orderController.receiveAll);
 

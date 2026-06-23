@@ -6,6 +6,7 @@ import Dashboard from "../components/Dashboard";
 import ProductList from "../components/ProductList";
 import BrandList from "../components/BrandList";
 import SupplierList from "../components/SupplierList";
+import BrandTrialList from "../components/BrandTrialList";
 import SettingsPage from "../components/SettingsPage";
 import StockControlList from "../components/StockControlList";
 import StockControlShow from "../components/StockControlShow";
@@ -93,6 +94,15 @@ const router = createHashRouter([
       {
         path: "/users/:userId/edit",
         Component: UserEdit,
+      },
+      // Marcas a prueba (admin/manager)
+      {
+        path: "/brand-trials",
+        element: (
+          <ProtectedRoute requiredRoles={["admin", "manager"]}>
+            <BrandTrialList />
+          </ProtectedRoute>
+        ),
       },
       // Orders routes
       {

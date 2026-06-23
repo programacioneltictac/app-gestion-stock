@@ -15,7 +15,11 @@ import Typography from '@mui/material/Typography';
 import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
+import SpeedIcon from '@mui/icons-material/Speed';
+import HourglassBottomIcon from '@mui/icons-material/HourglassBottom';
+import ScienceIcon from '@mui/icons-material/Science';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../context/AuthContext';
 import { getAlerts } from '../data/alerts';
@@ -38,7 +42,21 @@ function SummaryCard({ icon, label, value, color, onClick }) {
     </CardContent>
   );
   return (
-    <Card variant="outlined" sx={{ minWidth: 220, flex: '1 1 220px' }}>
+    <Card
+      variant="outlined"
+      sx={{
+        // 4 tarjetas por fila en desktop, 2 en tablet, 1 en móvil. El gap del
+        // Stack es 16px (spacing=2); para 4 columnas se descuentan 12px por celda.
+        flexGrow: 1,
+        flexShrink: 1,
+        flexBasis: {
+          xs: '100%',
+          sm: 'calc(50% - 8px)',
+          md: 'calc(25% - 12px)',
+        },
+        minWidth: 200,
+      }}
+    >
       {onClick ? <CardActionArea onClick={onClick}>{content}</CardActionArea> : content}
     </Card>
   );
@@ -119,8 +137,45 @@ export default function Dashboard() {
           label="Órdenes pendientes"
           value={data?.pendingOrders ?? 0}
           color="info"
-          onClick={() => navigate('/orders')}
+          onClick={() => navigate('/orders?status=pending')}
         />
+        <SummaryCard
+          icon={<AssignmentTurnedInIcon fontSize="large" />}
+          label="Órdenes autorizadas"
+          value={data?.authorizedOrders ?? 0}
+          color="primary"
+          onClick={() => navigate('/orders?status=autorizado')}
+        />
+        <SummaryCard
+          icon={<SpeedIcon fontSize="large" />}
+          label="Compliance promedio (controles activos)"
+          value={data?.avgCompliance != null ? `${data.avgCompliance}%` : '—'}
+          color={
+            data?.avgCompliance == null ? 'info'
+              : data.avgCompliance < 70 ? 'error'
+              : data.avgCompliance <= 120 ? 'success'
+              : 'warning'
+          }
+        />
+        <SummaryCard
+          icon={<HourglassBottomIcon fontSize="large" />}
+          label="Antigüedad prom. órdenes en gestión"
+          value={
+            data?.openOrdersTotal
+              ? `${data.avgOrderAgeDays} ${data.avgOrderAgeDays === 1 ? 'día' : 'días'}`
+              : '—'
+          }
+          color={data?.avgOrderAgeDays != null && data.avgOrderAgeDays >= 7 ? 'warning' : 'info'}
+        />
+        {(user?.role === 'admin' || user?.role === 'manager') && (
+          <SummaryCard
+            icon={<ScienceIcon fontSize="large" />}
+            label="Marcas a evaluar"
+            value={data?.brandTrialsDue ?? 0}
+            color={data?.brandTrialsDue > 0 ? 'warning' : 'info'}
+            onClick={() => navigate('/brand-trials?status=due')}
+          />
+        )}
         <SummaryCard
           icon={<Inventory2Icon fontSize="large" />}
           label="Stock discontinuo valorizado"
@@ -201,7 +256,7 @@ export default function Dashboard() {
                 {data.discontinuedValue.slice(0, 8).map((r) => (
                   <ListItemButton
                     key={`dv-${r.controlId}`}
-                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}`)}
+                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?tab=discontinued`)}
                   >
                     <ListItemText primary={`${r.branchName} — ${r.categoryName}`} />
                     <Typography variant="body2" fontWeight={500} color="secondary.main">

@@ -19,7 +19,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
-import { useParams, useNavigate } from "react-router";
+import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useDialogs } from "../hooks/useDialogs/useDialogs";
 import useNotifications from "../hooks/useNotifications/useNotifications";
 import {
@@ -102,7 +102,12 @@ export default function StockControlShow() {
   const [isGenerating, setIsGenerating] = React.useState(false);
 
   // Tab activa: 'control' (la tabla del control) | 'discontinued' (solo lectura).
-  const [activeTab, setActiveTab] = React.useState("control");
+  // Permite abrir directo en discontinuos via ?tab=discontinued (acceso desde el
+  // dashboard, tarjeta de stock discontinuo).
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = React.useState(
+    searchParams.get("tab") === "discontinued" ? "discontinued" : "control"
+  );
   const [discontinued, setDiscontinued] = React.useState([]);
   const [discLoaded, setDiscLoaded] = React.useState(false);
   const [isLoadingDisc, setIsLoadingDisc] = React.useState(false);
@@ -155,6 +160,13 @@ export default function StockControlShow() {
     setActiveTab(val);
     if (val === "discontinued" && !discLoaded) loadDiscontinued();
   }, [discLoaded, loadDiscontinued]);
+
+  // Si se entró directo en la tab de discontinuos (?tab=discontinued), dispara la
+  // carga lazy una vez al montar.
+  React.useEffect(() => {
+    if (activeTab === "discontinued" && !discLoaded) loadDiscontinued();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleBack = React.useCallback(() => {
     navigate(`/stock-control/${branchId}`);
@@ -242,17 +254,18 @@ export default function StockControlShow() {
     setIsGenerating(true);
     try {
       const orders = await createOrderFromControl(Number(controlId), selectionModel.map(Number));
-      // Con Nodo Hub pueden volver 2 órdenes (interna al Hub + externa al proveedor).
-      const internal = orders.find((o) => o.isInternal);
-      const external = orders.find((o) => !o.isInternal);
+      // Pueden volver: 1 interna (Hub) + N externas (1 por proveedor, consolidando
+      // en la orden abierta del proveedor si ya existía).
+      const internals = orders.filter((o) => o.isInternal);
+      const externals = orders.filter((o) => !o.isInternal);
       const parts = [];
-      if (internal) parts.push('interna (Hub)');
-      if (external) parts.push('externa (proveedor)');
+      if (internals.length) parts.push('1 interna (Hub)');
+      if (externals.length) parts.push(`${externals.length} a proveedor(es)`);
       const msg = orders.length > 1
-        ? `Se generaron ${orders.length} órdenes [${parts.join(' + ')}] con ${selectionModel.length} ítem(s)`
-        : `Orden ${parts[0] || ''} creada con ${selectionModel.length} ítem(s)`;
-      // Acción "Ver orden": preferimos la externa (la que va al proveedor); si no, la interna.
-      const target = external || internal || orders[0];
+        ? `Se generaron/actualizaron ${orders.length} órdenes [${parts.join(' + ')}] con ${selectionModel.length} ítem(s)`
+        : `Orden ${parts[0] || ''} con ${selectionModel.length} ítem(s)`;
+      // Acción "Ver orden": preferimos una externa (proveedor); si no, la interna.
+      const target = externals[0] || internals[0] || orders[0];
       notifications.show(msg, {
         severity: 'success',
         autoHideDuration: 4000,
@@ -420,7 +433,7 @@ export default function StockControlShow() {
   );
 
   // Columnas de la tabla de discontinuos (solo lectura): Producto, Rubro,
-  // Stock, Costo unit.
+  // Stock, Costo unit., Total valorizado (= stock * costo unit.).
   const discontinuedColumns = React.useMemo(
     () => [
       { field: "displayName", headerName: "Producto", flex: 1, minWidth: 220 },
@@ -434,6 +447,21 @@ export default function StockControlShow() {
         renderCell: ({ value }) => (
           <Box sx={{ display: "flex", alignItems: "center", height: "100%" }}>
             <Typography variant="body2">{value > 0 ? formatCurrency(value) : "-"}</Typography>
+          </Box>
+        ),
+      },
+      {
+        field: "totalValue",
+        headerName: "Total valorizado",
+        width: 150,
+        type: "number",
+        // stock * costo unit. (del sync). Se calcula de la fila, no viene del backend.
+        valueGetter: (_value, row) => (Number(row.stock) || 0) * (Number(row.avgCost) || 0),
+        renderCell: ({ value }) => (
+          <Box sx={{ display: "flex", alignItems: "center", height: "100%" }}>
+            <Typography variant="body2" fontWeight={500}>
+              {value > 0 ? formatCurrency(value) : "-"}
+            </Typography>
           </Box>
         ),
       },

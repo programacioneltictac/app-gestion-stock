@@ -28,9 +28,13 @@ import {
   updateOrderItemReceived,
   receiveAllOrderItems,
   deleteOrder,
+  deleteOrderItem,
   getOrderStatusLabel,
   getOrderStatusColor,
+  getOrderElapsedDays,
+  formatElapsedDays,
   ORDER_STATUSES_EDITABLE,
+  ORDER_STATUSES_RECEIVING,
   ORDER_STATUS_OPTIONS,
 } from '../data/orders';
 import PageContainer from './PageContainer';
@@ -107,11 +111,40 @@ export default function OrderShow() {
     setIsLoading(false);
   }, [orderId]);
 
+  // Borra un ítem de la orden. Rehabilita su producto en el control de origen.
+  // Si era el último ítem, la orden queda vacía y se elimina (volvemos al listado).
+  const handleDeleteItem = React.useCallback(async (item) => {
+    const confirmed = await dialogs.confirm(
+      `¿Quitar "${item.displayName}" de esta orden? Volverá a estar disponible para pedir en su control.`,
+      {
+        title: '¿Quitar ítem?',
+        severity: 'warning',
+        okText: 'Quitar',
+        cancelText: 'Cancelar',
+      }
+    );
+    if (!confirmed) return;
+    try {
+      const { orderDeleted } = await deleteOrderItem(item.id);
+      if (orderDeleted) {
+        notifications.show('Ítem quitado; la orden quedó vacía y fue eliminada', { severity: 'success', autoHideDuration: 4000 });
+        navigate('/orders');
+      } else {
+        notifications.show('Ítem quitado de la orden', { severity: 'success', autoHideDuration: 3000 });
+        loadData();
+      }
+    } catch (err) {
+      notifications.show(`Error: ${err.message}`, { severity: 'error', autoHideDuration: 4000 });
+    }
+  }, [dialogs, notifications, navigate, loadData]);
+
   React.useEffect(() => {
     loadData();
   }, [loadData]);
 
   const isOrderEditable = order && ORDER_STATUSES_EDITABLE.includes(order.status);
+  // La recepción de mercadería solo se habilita en 'Pedido realizado'.
+  const canReceive = order && ORDER_STATUSES_RECEIVING.includes(order.status);
   const hasPendingItems = items.some((it) => it.quantityReceived < it.quantityOrdered);
 
   const handleSaveStatus = React.useCallback(async () => {
@@ -222,7 +255,7 @@ export default function OrderShow() {
                   size="small"
                   color="success"
                   checked={isDone}
-                  disabled={!isOrderEditable || isSavingItem}
+                  disabled={!canReceive || isSavingItem}
                   onClick={(e) => e.stopPropagation()}
                   onChange={() => handleToggleReceived(row)}
                 />
@@ -251,6 +284,21 @@ export default function OrderShow() {
           );
         },
       },
+      // Sucursal del ítem: en órdenes externas consolidadas es la info que
+      // diferencia cada línea (la orden junta varias sucursales). En las internas
+      // todos los ítems son de la misma sucursal destino (igual se muestra).
+      {
+        field: 'branchName',
+        headerName: 'Sucursal',
+        width: 150,
+        renderCell: ({ value }) => (
+          <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+            <Typography variant="body2" color={value ? 'text.primary' : 'text.disabled'}>
+              {value || '—'}
+            </Typography>
+          </Box>
+        ),
+      },
       { field: 'categoryName', headerName: 'Rubro', width: 120 },
       {
         field: 'conditionName',
@@ -264,21 +312,6 @@ export default function OrderShow() {
           </Box>
         ),
       },
-      // Proveedor: solo relevante en órdenes externas (las internas van al Hub).
-      ...(order && !order.isInternal
-        ? [{
-            field: 'supplierName',
-            headerName: 'Proveedor',
-            width: 170,
-            renderCell: ({ value }) => (
-              <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-                <Typography variant="body2" color={value ? 'text.primary' : 'text.disabled'}>
-                  {value || 'Sin asignar'}
-                </Typography>
-              </Box>
-            ),
-          }]
-        : []),
       {
         field: 'quantityOrdered',
         headerName: 'Pedido',
@@ -319,8 +352,8 @@ export default function OrderShow() {
           }
           return (
             <Box
-              sx={{ display: 'flex', alignItems: 'center', height: '100%', cursor: isOrderEditable ? 'pointer' : 'default' }}
-              onClick={() => isOrderEditable && handleEditItem(row)}
+              sx={{ display: 'flex', alignItems: 'center', height: '100%', cursor: canReceive ? 'pointer' : 'default' }}
+              onClick={() => canReceive && handleEditItem(row)}
             >
               <Typography
                 variant="body2"
@@ -364,8 +397,36 @@ export default function OrderShow() {
           </Box>
         ),
       },
+      // Quitar ítem de la orden (admin/manager, orden no terminal). Rehabilita el
+      // producto en su control de origen.
+      ...(canDelete
+        ? [{
+            field: 'remove',
+            headerName: '',
+            width: 56,
+            sortable: false,
+            filterable: false,
+            disableColumnMenu: true,
+            align: 'center',
+            headerAlign: 'center',
+            renderCell: ({ row }) => (
+              <Tooltip title="Quitar ítem de la orden" enterDelay={600}>
+                <span>
+                  <IconButton
+                    size="small"
+                    color="error"
+                    disabled={!isOrderEditable}
+                    onClick={(e) => { e.stopPropagation(); handleDeleteItem(row); }}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            ),
+          }]
+        : []),
     ],
-    [editingItemId, editingQty, isSavingItem, isOrderEditable, handleEditItem, handleSaveItemReceived, handleToggleReceived, order]
+    [editingItemId, editingQty, isSavingItem, isOrderEditable, canReceive, canDelete, handleEditItem, handleSaveItemReceived, handleToggleReceived, handleDeleteItem]
   );
 
   if (isLoading) {
@@ -386,7 +447,13 @@ export default function OrderShow() {
 
   return (
     <PageContainer
-      title={order ? `Orden #${order.id} — ${order.branchName} — ${order.period}` : 'Orden de Reposicion'}
+      title={
+        order
+          ? order.isInternal
+            ? `Orden #${order.id} — ${order.branchName} — ${order.period}`
+            : `Orden #${order.id} — ${order.supplierName || 'Sin asignar'}`
+          : 'Orden de Reposicion'
+      }
       breadcrumbs={[
         { title: 'Ordenes de Reposicion', href: '/orders' },
         { title: `Orden #${order?.id}` },
@@ -401,7 +468,7 @@ export default function OrderShow() {
           >
             Descargar
           </ActionButton>
-          {isOrderEditable && hasPendingItems && (
+          {canReceive && hasPendingItems && (
             <ActionButton
               color="success"
               icon={<DoneAllIcon />}
@@ -434,7 +501,7 @@ export default function OrderShow() {
           label={
             order.isInternal
               ? `Interna · ${order.sourceBranchName || 'Nodo Hub'}`
-              : 'Externa · Proveedor'
+              : `Proveedor · ${order.supplierName || 'Sin asignar'}`
           }
         />
         <Typography variant="body2">
@@ -449,6 +516,23 @@ export default function OrderShow() {
         <Typography variant="body2" color="primary.main">
           Costo estimado: <strong>{formatCurrency(order.totalCostEstimate)}</strong>
         </Typography>
+        {order.createdAt && (
+          <Typography variant="body2">
+            Fecha: <strong>{new Date(order.createdAt).toLocaleDateString('es-ES')}</strong>
+            {(() => {
+              const days = getOrderElapsedDays(order);
+              return days != null ? (
+                <Chip
+                  label={formatElapsedDays(days)}
+                  size="small"
+                  variant="outlined"
+                  color={days >= 7 ? 'warning' : 'default'}
+                  sx={{ ml: 1 }}
+                />
+              ) : null;
+            })()}
+          </Typography>
+        )}
       </Stack>
 
       {/* Panel de cambio de estado — solo admin/manager */}

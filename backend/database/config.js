@@ -1,13 +1,23 @@
 const { Pool } = require("pg");
 
-// Crear un pool de conexiones
-const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
-});
+// En produccion (Render) la conexion viene en DATABASE_URL y exige SSL.
+// En local seguimos usando las variables sueltas DB_* sin SSL.
+const useConnectionString = Boolean(process.env.DATABASE_URL);
+
+const pool = new Pool(
+  useConnectionString
+    ? {
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+      }
+    : {
+        user: process.env.DB_USER,
+        host: process.env.DB_HOST,
+        database: process.env.DB_NAME,
+        password: process.env.DB_PASSWORD,
+        port: process.env.DB_PORT,
+      }
+);
 
 // Función para testear la conexión
 const testConnection = async () => {

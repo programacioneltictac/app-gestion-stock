@@ -69,6 +69,10 @@ app.use("/api/orders", authenticateToken, orderRoutes);
 const supplierRoutes = require("./routes/suppliers");
 app.use("/api/suppliers", supplierRoutes);
 
+// Rutas de marcas a prueba (ciclo de vida de marcas nuevas)
+const brandTrialRoutes = require("./routes/brandTrials");
+app.use("/api/brand-trials", brandTrialRoutes);
+
 // Rutas de configuración global (app_settings)
 const settingRoutes = require("./routes/settings");
 app.use("/api/settings", settingRoutes);
@@ -76,6 +80,23 @@ app.use("/api/settings", settingRoutes);
 // Rutas de alertas tempranas (panel del dashboard)
 const alertRoutes = require("./routes/alerts");
 app.use("/api/alerts", authenticateToken, alertRoutes);
+
+// ==================== FRONTEND (produccion) ====================
+// En produccion el backend sirve el build de Vite (react-frontend/dist).
+// El frontend usa rutas relativas (/api), asi que comparten origen y no hay CORS.
+if (process.env.NODE_ENV === "production") {
+  const frontendDist = path.join(__dirname, "..", "react-frontend", "dist");
+  app.use(express.static(frontendDist));
+
+  // Fallback SPA: cualquier ruta que no sea /api devuelve index.html
+  // para que React Router maneje el enrutado del lado del cliente.
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || req.path.startsWith("/api")) {
+      return next();
+    }
+    res.sendFile(path.join(frontendDist, "index.html"));
+  });
+}
 
 // ==================== MANEJO DE ERRORES ====================
 
