@@ -35,6 +35,10 @@ class OrderService {
   async deleteOrder(orderId) {
     return apiClient.delete(`/orders/${orderId}`);
   }
+
+  async deleteOrderItem(detailId) {
+    return apiClient.delete(`/orders/items/${detailId}`);
+  }
 }
 
 const orderService = new OrderService();

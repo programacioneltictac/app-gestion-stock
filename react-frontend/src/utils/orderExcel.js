@@ -9,14 +9,15 @@ export async function exportOrderToExcel(order, items) {
 
   const sheet = workbook.addWorksheet(`Orden ${order.id}`);
 
-  // El proveedor solo es relevante en ordenes externas (las internas van al Hub).
-  const showSupplier = !order.isInternal;
+  // Las ordenes externas se consolidan por proveedor (cabecera) y son
+  // multi-sucursal: la sucursal es la info que diferencia cada item.
+  const isExternal = !order.isInternal;
 
   const columns = [
     { header: 'Producto', key: 'displayName', width: 40 },
+    ...(isExternal ? [{ header: 'Sucursal', key: 'branchName', width: 20 }] : []),
     { header: 'Rubro', key: 'categoryName', width: 18 },
     { header: 'Condición', key: 'conditionName', width: 16 },
-    ...(showSupplier ? [{ header: 'Proveedor', key: 'supplierName', width: 24 }] : []),
     { header: 'Pedido', key: 'quantityOrdered', width: 10 },
     { header: 'Recibido', key: 'quantityReceived', width: 10 },
     { header: 'Costo unit.', key: 'unitCost', width: 14 },
@@ -33,9 +34,9 @@ export async function exportOrderToExcel(order, items) {
   items.forEach((it) => {
     sheet.addRow({
       displayName: it.displayName,
+      ...(isExternal ? { branchName: it.branchName || '—' } : {}),
       categoryName: it.categoryName,
       conditionName: it.conditionName || '—',
-      ...(showSupplier ? { supplierName: it.supplierName || 'Sin asignar' } : {}),
       quantityOrdered: it.quantityOrdered,
       quantityReceived: it.quantityReceived,
       unitCost: it.unitCost || 0,
@@ -69,8 +70,11 @@ export async function exportOrderToExcel(order, items) {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
 
-  const tipo = order.isInternal ? 'interna' : 'externa';
-  const fileName = `orden-${order.id}-${order.branchName || ''}-${tipo}`
+  // Externas: el archivo se nombra por proveedor; internas por sucursal destino.
+  const etiqueta = isExternal
+    ? (order.supplierName || 'sin-proveedor')
+    : `${order.branchName || ''}-interna`;
+  const fileName = `orden-${order.id}-${etiqueta}`
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') + '.xlsx';

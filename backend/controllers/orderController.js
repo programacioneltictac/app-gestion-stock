@@ -2,7 +2,16 @@ const Order = require("../models/Order");
 const MonthlyControl = require("../models/MonthlyControl");
 const { canAccessBranch } = require("../middlewares/auth");
 const { handleControllerError } = require("../utils/errorHelper");
-const { ORDER_STATUSES, ORDER_STATUSES_TERMINAL } = require("../utils/orderStatus");
+const {
+  ORDER_STATUSES,
+  ORDER_STATUSES_TERMINAL,
+  ORDER_STATUSES_RECEIVING,
+} = require("../utils/orderStatus");
+
+// Las ordenes EXTERNAS (proveedor) son multi-sucursal y las gestiona compras
+// (area centralizada): solo admin/manager. Las INTERNAS (Hub) mantienen el
+// control de acceso por sucursal del empleado.
+const canManageExternalOrders = (user) => user.role !== "employee";
 
 // POST /api/orders/from-control
 // Genera una orden de reposicion con los items seleccionados de un control.
@@ -39,19 +48,20 @@ const createFromControl = async (req, res) => {
       });
     }
 
-    // Nodo Hub: pueden generarse hasta 2 ordenes (interna al Hub + externa al proveedor).
-    const internal = orders.find((o) => o.order_type === "internal");
-    const external = orders.find((o) => o.order_type === "external");
+    // Pueden generarse: 1 orden interna (Hub) + N externas (1 por proveedor,
+    // consolidando con la orden abierta del proveedor si ya existe).
+    const internalCount = orders.filter((o) => o.order_type === "internal").length;
+    const externalCount = orders.filter((o) => o.order_type === "external").length;
     const parts = [];
-    if (internal) parts.push("interna (Hub)");
-    if (external) parts.push("externa (proveedor)");
+    if (internalCount) parts.push("1 interna (Hub)");
+    if (externalCount) parts.push(`${externalCount} externa(s) (proveedor)`);
 
     console.log(
-      `Orden(es) creada(s) - IDs: ${orders.map((o) => o.id).join(", ")}, Control: ${monthly_control_id}, Items: ${itemCount}, Tipos: ${parts.join(" + ")}, Usuario: ${req.user.username}`
+      `Orden(es) afectada(s) - IDs: ${orders.map((o) => o.id).join(", ")}, Control: ${monthly_control_id}, Items: ${itemCount}, Tipos: ${parts.join(" + ")}, Usuario: ${req.user.username}`
     );
     res.status(201).json({
       status: "success",
-      message: `Se generaron ${orders.length} orden(es) [${parts.join(" + ")}] con ${itemCount} items`,
+      message: `Se generaron/actualizaron ${orders.length} orden(es) [${parts.join(" + ")}] con ${itemCount} items`,
       orders,
     });
   } catch (error) {
@@ -96,7 +106,13 @@ const getOrderDetail = async (req, res) => {
     if (!order) {
       return res.status(404).json({ status: "error", message: "Orden no encontrada" });
     }
-    if (!canAccessBranch(req.user, order.branch_id)) {
+    // Las externas (proveedor) son multi-sucursal: solo admin/manager. Las
+    // internas se validan por sucursal del empleado.
+    if (order.order_type === "external") {
+      if (!canManageExternalOrders(req.user)) {
+        return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
+      }
+    } else if (!canAccessBranch(req.user, order.branch_id)) {
       return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
     }
 
@@ -125,13 +141,17 @@ const updateStatus = async (req, res) => {
     if (!order) {
       return res.status(404).json({ status: "error", message: "Orden no encontrada" });
     }
-    if (!canAccessBranch(req.user, order.branch_id)) {
+    if (order.order_type === "external") {
+      if (!canManageExternalOrders(req.user)) {
+        return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
+      }
+    } else if (!canAccessBranch(req.user, order.branch_id)) {
       return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
     }
     if (ORDER_STATUSES_TERMINAL.includes(order.status)) {
       return res.status(400).json({
         status: "error",
-        message: "No se puede modificar una orden completada o cancelada"
+        message: "No se puede modificar una orden finalizada o cancelada"
       });
     }
 
@@ -144,7 +164,8 @@ const updateStatus = async (req, res) => {
 };
 
 // PATCH /api/orders/items/:detail_id/received
-// Registra cantidad recibida de un item y recalcula estado de la orden
+// Registra cantidad recibida de un item. La recepcion solo se habilita cuando
+// la orden esta en 'pedido_realizado' (estados manuales — no se autocompleta).
 const updateItemReceived = async (req, res) => {
   try {
     const { detail_id } = req.params;
@@ -154,12 +175,30 @@ const updateItemReceived = async (req, res) => {
       return res.status(400).json({ status: "error", message: "quantity_received debe ser >= 0" });
     }
 
+    const order = await Order.findByDetailId(detail_id);
+    if (!order) {
+      return res.status(404).json({ status: "error", message: "Item de orden no encontrado" });
+    }
+    if (order.order_type === "external") {
+      if (!canManageExternalOrders(req.user)) {
+        return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
+      }
+    } else if (!canAccessBranch(req.user, order.branch_id)) {
+      return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
+    }
+    if (!ORDER_STATUSES_RECEIVING.includes(order.status)) {
+      return res.status(400).json({
+        status: "error",
+        message: "La recepción solo se habilita cuando la orden está en 'Pedido realizado'",
+      });
+    }
+
     const orderId = await Order.updateDetailReceived(detail_id, parseInt(quantity_received), notes);
 
-    const order = await Order.findById(orderId);
+    const updated = await Order.findById(orderId);
     const items = await Order.findDetailsByOrderId(orderId);
 
-    res.json({ status: "success", order, items });
+    res.json({ status: "success", order: updated, items });
   } catch (error) {
     handleControllerError(res, error, "Error actualizando item recibido:");
   }
@@ -175,13 +214,17 @@ const receiveAll = async (req, res) => {
     if (!order) {
       return res.status(404).json({ status: "error", message: "Orden no encontrada" });
     }
-    if (!canAccessBranch(req.user, order.branch_id)) {
+    if (order.order_type === "external") {
+      if (!canManageExternalOrders(req.user)) {
+        return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
+      }
+    } else if (!canAccessBranch(req.user, order.branch_id)) {
       return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
     }
-    if (ORDER_STATUSES_TERMINAL.includes(order.status)) {
+    if (!ORDER_STATUSES_RECEIVING.includes(order.status)) {
       return res.status(400).json({
         status: "error",
-        message: "No se puede modificar una orden completada o cancelada"
+        message: "La recepción solo se habilita cuando la orden está en 'Pedido realizado'",
       });
     }
 
@@ -222,6 +265,41 @@ const deleteOrder = async (req, res) => {
   }
 };
 
+// DELETE /api/orders/items/:detail_id
+// Borra un item individual de una orden (admin/manager). Rehabilita su control
+// si queda sin vinculo y elimina la orden si queda vacia.
+const deleteDetail = async (req, res) => {
+  try {
+    const { detail_id } = req.params;
+
+    if (req.user.role === "employee") {
+      return res.status(403).json({ status: "error", message: "No tienes permiso para borrar items de órdenes" });
+    }
+
+    const order = await Order.findByDetailId(detail_id);
+    if (!order) {
+      return res.status(404).json({ status: "error", message: "Item de orden no encontrado" });
+    }
+    if (ORDER_STATUSES_TERMINAL.includes(order.status)) {
+      return res.status(400).json({
+        status: "error",
+        message: "No se puede modificar una orden finalizada o cancelada",
+      });
+    }
+
+    const { orderId, orderDeleted } = await Order.deleteDetail(detail_id);
+    console.log(`Item de orden eliminado - Detail: ${detail_id}, Orden: ${orderId}, Vaciada: ${orderDeleted}, Usuario: ${req.user.username}`);
+
+    res.json({
+      status: "success",
+      message: orderDeleted ? "Item eliminado; la orden quedó vacía y fue eliminada" : "Item eliminado",
+      orderDeleted,
+    });
+  } catch (error) {
+    handleControllerError(res, error, "Error eliminando item de orden:");
+  }
+};
+
 module.exports = {
   createFromControl,
   getOrders,
@@ -230,4 +308,5 @@ module.exports = {
   updateItemReceived,
   receiveAll,
   deleteOrder,
+  deleteDetail,
 };

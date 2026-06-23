@@ -13,11 +13,11 @@ import { dataGridClickableSx, dataGridLoadingSlotProps } from './dataGridStyles'
 import RefreshIcon from '@mui/icons-material/Refresh';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useDialogs } from '../hooks/useDialogs/useDialogs';
 import useNotifications from '../hooks/useNotifications/useNotifications';
 import { useAuth } from '../context/AuthContext';
-import { getOrders, deleteOrder, getOrderStatusLabel, getOrderStatusColor, ORDER_STATUSES } from '../data/orders';
+import { getOrders, deleteOrder, getOrderStatusLabel, getOrderStatusColor, getOrderElapsedDays, formatElapsedDays, ORDER_STATUSES } from '../data/orders';
 import { getBranchesList } from '../data/branches';
 import PageContainer from './PageContainer';
 import ActionButton from './ActionButton';
@@ -32,15 +32,23 @@ export default function OrderList() {
   const notifications = useNotifications();
   const { user } = useAuth();
 
+  // Estado inicial opcional desde la URL (?status=...), p.ej. acceso directo
+  // desde las tarjetas del dashboard ("Órdenes pendientes" / "autorizadas").
+  const [searchParams] = useSearchParams();
+  const initialStatus = searchParams.get('status') || '';
+
   const [orders, setOrders] = React.useState([]);
   const [branches, setBranches] = React.useState([]);
   const [filterBranch, setFilterBranch] = React.useState('');
-  const [filterStatus, setFilterStatus] = React.useState('');
-  const [activeTab, setActiveTab] = React.useState('external');
+  const [filterSupplier, setFilterSupplier] = React.useState('');
+  const [filterStatus, setFilterStatus] = React.useState(initialStatus);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
 
   const isEmployee = user?.role === 'employee';
+  // Las ordenes externas (proveedor) las gestiona compras: solo admin/manager.
+  // El empleado solo ve el tab interno (Hub).
+  const [activeTab, setActiveTab] = React.useState(isEmployee ? 'internal' : 'external');
 
   const loadData = React.useCallback(async () => {
     setError(null);
@@ -62,23 +70,27 @@ export default function OrderList() {
     loadData();
   }, [loadData]);
 
-  // Filtro común (sucursal/estado) antes de separar por tipo de orden.
-  const baseFilteredOrders = React.useMemo(() => {
-    return orders.filter((o) => {
-      if (filterBranch && String(o.branchId) !== String(filterBranch)) return false;
-      if (filterStatus && o.status !== filterStatus) return false;
-      return true;
-    });
-  }, [orders, filterBranch, filterStatus]);
-
+  // Separación por tipo. Las externas son multi-sucursal: se filtran por
+  // proveedor; las internas (Hub) por sucursal destino. El estado aplica a ambas.
   const externalOrders = React.useMemo(
-    () => baseFilteredOrders.filter((o) => !o.isInternal),
-    [baseFilteredOrders]
+    () => orders.filter((o) => !o.isInternal && (!filterStatus || o.status === filterStatus)
+      && (!filterSupplier || String(o.supplierId || '') === String(filterSupplier))),
+    [orders, filterStatus, filterSupplier]
   );
   const internalOrders = React.useMemo(
-    () => baseFilteredOrders.filter((o) => o.isInternal),
-    [baseFilteredOrders]
+    () => orders.filter((o) => o.isInternal && (!filterStatus || o.status === filterStatus)
+      && (!filterBranch || String(o.branchId) === String(filterBranch))),
+    [orders, filterStatus, filterBranch]
   );
+
+  // Proveedores presentes en las órdenes externas (para el filtro del tab).
+  const supplierOptions = React.useMemo(() => {
+    const map = new Map();
+    orders.filter((o) => !o.isInternal && o.supplierId).forEach((o) => {
+      map.set(o.supplierId, o.supplierName || `Proveedor #${o.supplierId}`);
+    });
+    return Array.from(map, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [orders]);
 
   const filteredOrders = activeTab === 'internal' ? internalOrders : externalOrders;
 
@@ -113,24 +125,37 @@ export default function OrderList() {
   const columns = React.useMemo(
     () => [
       { field: 'id', headerName: 'ID', width: 70 },
-      {
-        field: 'branchName',
-        headerName: activeTab === 'internal' ? 'Sucursal destino' : 'Sucursal',
-        flex: 1,
-        minWidth: 130,
-      },
+      // Tab externo: la orden se identifica por PROVEEDOR (es multi-sucursal/rubro).
+      // Tab interno (Hub): se mantiene sucursal destino + origen + rubro + período.
       ...(activeTab === 'internal'
-        ? [{ field: 'sourceBranchName', headerName: 'Origen (Hub)', width: 150 }]
-        : []),
-      {
-        field: 'categoryName',
-        headerName: 'Rubro',
-        width: 150,
-        renderCell: ({ value }) => (
-          <Chip label={value || '—'} size="small" variant="outlined" />
-        ),
-      },
-      { field: 'period', headerName: 'Período', width: 110 },
+        ? [
+            { field: 'branchName', headerName: 'Sucursal destino', flex: 1, minWidth: 130 },
+            { field: 'sourceBranchName', headerName: 'Origen (Hub)', width: 150 },
+            {
+              field: 'categoryName',
+              headerName: 'Rubro',
+              width: 150,
+              renderCell: ({ value }) => (
+                <Chip label={value || '—'} size="small" variant="outlined" />
+              ),
+            },
+            { field: 'period', headerName: 'Período', width: 110 },
+          ]
+        : [
+            {
+              field: 'supplierName',
+              headerName: 'Proveedor',
+              flex: 1,
+              minWidth: 200,
+              renderCell: ({ value }) => (
+                <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+                  <Typography variant="body2" color={value ? 'text.primary' : 'text.disabled'}>
+                    {value || 'Sin asignar'}
+                  </Typography>
+                </Box>
+              ),
+            },
+          ]),
       { field: 'totalItems', headerName: 'Items', width: 80, type: 'number' },
       { field: 'totalUnitsOrdered', headerName: 'Uds. pedidas', width: 110, type: 'number' },
       { field: 'totalUnitsReceived', headerName: 'Uds. recibidas', width: 120, type: 'number' },
@@ -161,8 +186,24 @@ export default function OrderList() {
       {
         field: 'createdAt',
         headerName: 'Fecha',
-        width: 120,
-        valueFormatter: (value) => value ? new Date(value).toLocaleDateString('es-ES') : '',
+        width: 170,
+        renderCell: ({ value, row }) => {
+          if (!value) return '';
+          const days = getOrderElapsedDays(row);
+          return (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, height: '100%' }}>
+              <Typography variant="body2">{new Date(value).toLocaleDateString('es-ES')}</Typography>
+              {days != null && (
+                <Chip
+                  label={formatElapsedDays(days)}
+                  size="small"
+                  variant="outlined"
+                  color={days >= 7 ? 'warning' : 'default'}
+                />
+              )}
+            </Box>
+          );
+        },
       },
       {
         field: 'actions',
@@ -204,19 +245,33 @@ export default function OrderList() {
         </ActionButton>
       }
     >
-      {/* Filtros — solo para admin/manager */}
+      {/* Filtros. En el tab externo se filtra por PROVEEDOR; en el interno por
+          sucursal (solo admin/manager). El estado aplica a ambos. */}
       {!isEmployee && (
         <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
-          <Autocomplete
-            size="small"
-            options={branches}
-            getOptionLabel={(o) => o.name || ''}
-            value={branches.find((b) => String(b.id) === String(filterBranch)) || null}
-            onChange={(_, val) => setFilterBranch(val ? val.id : '')}
-            isOptionEqualToValue={(o, v) => o.id === v.id}
-            renderInput={(params) => <TextField {...params} label="Sucursal" />}
-            sx={{ minWidth: 200 }}
-          />
+          {activeTab === 'external' ? (
+            <Autocomplete
+              size="small"
+              options={supplierOptions}
+              getOptionLabel={(o) => o.name || ''}
+              value={supplierOptions.find((s) => String(s.id) === String(filterSupplier)) || null}
+              onChange={(_, val) => setFilterSupplier(val ? val.id : '')}
+              isOptionEqualToValue={(o, v) => o.id === v.id}
+              renderInput={(params) => <TextField {...params} label="Proveedor" />}
+              sx={{ minWidth: 240 }}
+            />
+          ) : (
+            <Autocomplete
+              size="small"
+              options={branches}
+              getOptionLabel={(o) => o.name || ''}
+              value={branches.find((b) => String(b.id) === String(filterBranch)) || null}
+              onChange={(_, val) => setFilterBranch(val ? val.id : '')}
+              isOptionEqualToValue={(o, v) => o.id === v.id}
+              renderInput={(params) => <TextField {...params} label="Sucursal" />}
+              sx={{ minWidth: 200 }}
+            />
+          )}
           <Autocomplete
             size="small"
             options={ORDER_STATUSES}
@@ -229,13 +284,14 @@ export default function OrderList() {
         </Stack>
       )}
 
-      {/* Separación: órdenes a proveedores (externas) vs Nodo Hub (internas) */}
+      {/* Separación: órdenes a proveedores (externas) vs Nodo Hub (internas).
+          El tab de proveedores es solo para admin/manager (compras). */}
       <Tabs
         value={activeTab}
         onChange={(_, val) => setActiveTab(val)}
         sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
       >
-        <Tab value="external" label={`Proveedores (${externalOrders.length})`} />
+        {!isEmployee && <Tab value="external" label={`Proveedores (${externalOrders.length})`} />}
         <Tab value="internal" label={`Nodo Hub (${internalOrders.length})`} />
       </Tabs>
 

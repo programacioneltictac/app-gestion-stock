@@ -24,7 +24,7 @@ class Order {
    *   cubrible_hub = min(faltante, disponible_hub)   -> orden interna
    *   resto        = faltante - cubrible_hub          -> orden externa
    * donde disponible_hub = stock del Hub del mismo product_id/group_id MENOS lo
-   * comprometido en ordenes internas abiertas (todas salvo 'cancelled'). La app
+   * comprometido en ordenes internas abiertas (todas salvo 'cancelado'). La app
    * NO mueve stock real: la reserva es estado derivado de las ordenes internas.
    * El Hub se excluye a si mismo (un control de la sucursal Hub no se autoabastece).
    *
@@ -90,6 +90,10 @@ class Order {
            psb.display_name,
            psb.product_id,
            psb.group_id,
+           -- Proveedor del item (orden externa). Se deriva de la marca via
+           -- product_groups.brand_id (grupos) o products.brand_id (sueltos) ->
+           -- brands.supplier_id. NULL si la marca no tiene proveedor mapeado.
+           COALESCE(pg_sup.supplier_id, prod_sup.supplier_id)  AS supplier_id,
            GREATEST(
              CEIL(sc.stock_require * $4::numeric / 100) - sc.stock_current
                + CASE WHEN $3 THEN COALESCE((
@@ -97,7 +101,7 @@ class Order {
                    FROM order_details od
                    JOIN orders_controls oc ON od.order_control_id = oc.id
                    WHERE oc.order_type = 'internal'
-                     AND oc.status <> 'cancelled'
+                     AND oc.status <> 'cancelado'
                      AND od.product_stock_id = sc.product_stock_id
                  ), 0) ELSE 0 END,
              1
@@ -123,6 +127,16 @@ class Order {
          FROM stock_controls sc
          JOIN product_stock_by_branch psb ON sc.product_stock_id = psb.id
          LEFT JOIN products p ON psb.product_id = p.id
+         LEFT JOIN LATERAL (
+           SELECT b.supplier_id
+           FROM product_groups g JOIN brands b ON g.brand_id = b.id
+           WHERE g.id = psb.group_id
+         ) pg_sup ON true
+         LEFT JOIN LATERAL (
+           SELECT b.supplier_id
+           FROM products pr JOIN brands b ON pr.brand_id = b.id
+           WHERE pr.id = psb.product_id
+         ) prod_sup ON true
          WHERE sc.monthly_control_id = $1
            AND sc.id = ANY($2::int[])
            AND sc.stock_status_id = 1
@@ -154,7 +168,7 @@ class Order {
           const refId = it.product_id || it.group_id;
 
           // disponible_hub = stock del Hub del mismo producto/grupo MENOS lo ya
-          // comprometido en ordenes internas abiertas (todas salvo 'cancelled').
+          // comprometido en ordenes internas abiertas (todas salvo 'cancelado').
           // La reserva cruza por el psb del HUB (hub_psb.id): la linea interna se
           // guarda con product_stock_id = psb del Hub (de donde sale el stock).
           const availResult = await client.query(
@@ -167,7 +181,7 @@ class Order {
                  JOIN orders_controls oc ON od.order_control_id = oc.id
                  WHERE oc.order_type = 'internal'
                    AND oc.source_branch_id = $1
-                   AND oc.status <> 'cancelled'
+                   AND oc.status <> 'cancelado'
                    AND od.product_stock_id = hub_psb.id
                ), 0) AS reservado
              FROM product_stock_by_branch hub_psb
@@ -201,87 +215,121 @@ class Order {
             display_name: it.display_name,
             qty: resto,
             unit_cost: Number(it.unit_cost),
+            supplier_id: it.supplier_id || null, // proveedor (NULL = sin asignar)
           });
         }
       }
 
       const orders = [];
 
-      // Helper: crea una orden de un tipo dado con sus lineas. Devuelve la orden
-      // o null si no hay lineas. No marca ordered_at (se hace al final, una vez).
-      const createOrderWithLines = async (orderType, sourceBranchId, lines) => {
-        if (lines.length === 0) return null;
-
-        const orderResult = await client.query(
-          `INSERT INTO orders_controls
-             (branch_id, control_year, control_month, monthly_control_id,
-              status, created_by, order_type, source_branch_id)
-           VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7)
-           RETURNING *`,
-          [
-            control.branch_id, control.control_year, control.control_month,
-            monthlyControlId, createdBy, orderType, sourceBranchId,
-          ]
-        );
-        const order = orderResult.rows[0];
-
-        // El proveedor solo aplica a la orden EXTERNA (la interna va al Hub). Se
-        // deriva de la marca del producto: psb → product_groups/products → brand.
-        const isExternal = orderType === "external";
-
+      // Helper: inserta lineas en una orden ya existente. La interna no lleva
+      // proveedor; la externa lo guarda en cada detalle (ya derivado en ln.supplier_id).
+      const appendLinesToOrder = async (orderId, lines, isExternal) => {
         for (const ln of lines) {
           await client.query(
             `INSERT INTO order_details
                (order_control_id, stock_control_id, product_stock_id, display_name,
                 quantity_ordered, quantity_received, unit_cost, cost_estimate, supplier_id)
-             VALUES ($1, $2, $3, $4, $5, 0, $6, $7,
-               CASE WHEN $8 THEN (
-                 SELECT COALESCE(pg.brand_id_supplier, p.brand_id_supplier)
-                 FROM product_stock_by_branch psb
-                 LEFT JOIN LATERAL (
-                   SELECT b.supplier_id AS brand_id_supplier
-                   FROM product_groups g JOIN brands b ON g.brand_id = b.id
-                   WHERE g.id = psb.group_id
-                 ) pg ON true
-                 LEFT JOIN LATERAL (
-                   SELECT b.supplier_id AS brand_id_supplier
-                   FROM products pr JOIN brands b ON pr.brand_id = b.id
-                   WHERE pr.id = psb.product_id
-                 ) p ON true
-                 WHERE psb.id = $3
-               ) ELSE NULL END)`,
+             VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8)`,
             [
-              order.id, ln.stock_control_id, ln.product_stock_id, ln.display_name,
-              ln.qty, ln.unit_cost, ln.unit_cost * ln.qty, isExternal,
+              orderId, ln.stock_control_id, ln.product_stock_id, ln.display_name,
+              ln.qty, ln.unit_cost, ln.unit_cost * ln.qty,
+              isExternal ? ln.supplier_id || null : null,
             ]
           );
         }
+      };
 
-        // Total estimado de la orden. RETURNING para devolver el objeto fresco
-        // (el `order` de arriba se leyo antes de insertar los detalles).
+      // Helper: recalcula el total de la orden y devuelve el objeto fresco.
+      const refreshOrderTotal = async (order) => {
         const totalResult = await client.query(
           `UPDATE orders_controls
            SET cost_estimate = (
              SELECT COALESCE(SUM(cost_estimate), 0) FROM order_details WHERE order_control_id = $1
-           )
+           ),
+               updated_at = NOW()
            WHERE id = $1
-           RETURNING cost_estimate`,
+           RETURNING *`,
           [order.id]
         );
-        order.cost_estimate = totalResult.rows[0].cost_estimate;
-
-        return order;
+        return totalResult.rows[0];
       };
 
-      const internalOrder = await createOrderWithLines("internal", hubBranchId, internalLines);
-      const externalOrder = await createOrderWithLines("external", null, externalLines);
-      if (internalOrder) orders.push(internalOrder);
-      if (externalOrder) orders.push(externalOrder);
+      // ---- Orden INTERNA (Hub): se crea 1 por control, sin consolidar. --------
+      if (internalLines.length > 0) {
+        const orderResult = await client.query(
+          `INSERT INTO orders_controls
+             (branch_id, control_year, control_month, monthly_control_id,
+              status, created_by, order_type, source_branch_id)
+           VALUES ($1, $2, $3, $4, 'pending', $5, 'internal', $6)
+           RETURNING *`,
+          [
+            control.branch_id, control.control_year, control.control_month,
+            monthlyControlId, createdBy, hubBranchId,
+          ]
+        );
+        const internalOrder = orderResult.rows[0];
+        await appendLinesToOrder(internalOrder.id, internalLines, false);
+        orders.push(await refreshOrderTotal(internalOrder));
+      }
+
+      // ---- Ordenes EXTERNAS: CONSOLIDADAS por proveedor. ----------------------
+      // Por cada supplier_id distinto (incluido NULL = "sin proveedor"), buscar
+      // la orden externa ABIERTA de ese proveedor (pending|en_evaluacion) y
+      // acumular las lineas; si no existe, crear una nueva en 'pending'. El
+      // indice unico parcial garantiza maximo 1 orden abierta por proveedor.
+      const linesBySupplier = new Map(); // supplier_id (o 'null') -> lines[]
+      for (const ln of externalLines) {
+        const key = ln.supplier_id == null ? "null" : String(ln.supplier_id);
+        if (!linesBySupplier.has(key)) linesBySupplier.set(key, []);
+        linesBySupplier.get(key).push(ln);
+      }
+
+      for (const [, lines] of linesBySupplier) {
+        const supplierId = lines[0].supplier_id || null;
+
+        // Buscar la orden externa abierta del proveedor (FOR UPDATE para
+        // serializar contra otra generacion concurrente del mismo proveedor).
+        const openResult = await client.query(
+          `SELECT * FROM orders_controls
+           WHERE order_type = 'external'
+             AND status IN ('pending', 'en_evaluacion')
+             AND supplier_id IS NOT DISTINCT FROM $1
+           ORDER BY id
+           LIMIT 1
+           FOR UPDATE`,
+          [supplierId]
+        );
+
+        let order = openResult.rows[0];
+        if (!order) {
+          const created = await client.query(
+            `INSERT INTO orders_controls
+               (branch_id, control_year, control_month, monthly_control_id,
+                status, created_by, order_type, source_branch_id, supplier_id)
+             VALUES ($1, $2, $3, $4, 'pending', $5, 'external', NULL, $6)
+             RETURNING *`,
+            [
+              control.branch_id, control.control_year, control.control_month,
+              monthlyControlId, createdBy, supplierId,
+            ]
+          );
+          order = created.rows[0];
+        }
+
+        await appendLinesToOrder(order.id, lines, true);
+        orders.push(await refreshOrderTotal(order));
+      }
 
       // Marcar como pedidos TODOS los stock_controls que entraron en alguna orden.
       // El flag canonico es ordered_at (un control puede tener linea interna y
-      // externa). order_detail_id se conserva pero ya no es el vinculo unico:
-      // se setea al detalle EXTERNO si existe, sino al interno, por compatibilidad.
+      // externa). El vinculo es DIRECTO por od.stock_control_id: una orden externa
+      // consolidada puede pertenecer a OTRO control (Casa Central) y aun asi
+      // contener lineas de ESTE control (Boutique). Por eso NO se filtra por
+      // oc.monthly_control_id (eso dejaba sin marcar los items acumulados en
+      // ordenes de otro control -> el chip "Pedido a proveedor" no aparecia y el
+      // item volvia a ser pedible, duplicando ordenes). order_detail_id se setea
+      // al detalle EXTERNO si existe, sino al interno, por compatibilidad.
       await client.query(
         `UPDATE stock_controls sc
          SET ordered_at      = NOW(),
@@ -290,19 +338,16 @@ class Order {
                FROM order_details od
                JOIN orders_controls oc ON od.order_control_id = oc.id
                WHERE od.stock_control_id = sc.id
-                 AND oc.monthly_control_id = $1
                ORDER BY (oc.order_type = 'external') DESC, od.id DESC
                LIMIT 1
              ),
              updated_at      = NOW()
-         WHERE sc.id = ANY($2::int[])
+         WHERE sc.id = ANY($1::int[])
            AND sc.ordered_at IS NULL
            AND EXISTS (
-             SELECT 1 FROM order_details od
-             JOIN orders_controls oc ON od.order_control_id = oc.id
-             WHERE od.stock_control_id = sc.id AND oc.monthly_control_id = $1
+             SELECT 1 FROM order_details od WHERE od.stock_control_id = sc.id
            )`,
-        [monthlyControlId, stockControlIds]
+        [stockControlIds]
       );
 
       await client.query("COMMIT");
@@ -324,6 +369,7 @@ class Order {
               b.name        AS branch_name,
               b.code        AS branch_code,
               sb.name       AS source_branch_name,
+              sup.supplier_name,
               u.username    AS created_by_username,
               mc.status     AS source_control_status,
               mc.category_id,
@@ -331,6 +377,7 @@ class Order {
        FROM orders_controls oc
        LEFT JOIN branches         b   ON oc.branch_id          = b.id
        LEFT JOIN branches         sb  ON oc.source_branch_id   = sb.id
+       LEFT JOIN suppliers        sup ON oc.supplier_id        = sup.id
        LEFT JOIN users            u   ON oc.created_by         = u.id
        LEFT JOIN monthly_controls mc  ON oc.monthly_control_id = mc.id
        LEFT JOIN categories       cat ON mc.category_id        = cat.id
@@ -425,6 +472,8 @@ class Order {
          COALESCE(c.category_name, pg.category_type) AS category_name,
          sc.condition_id,
          cond.condition_name,
+         sc.branch_id       AS item_branch_id,
+         scb.name           AS item_branch_name,
          od.updated_at
        FROM order_details od
        LEFT JOIN product_stock_by_branch psb ON od.product_stock_id = psb.id
@@ -433,6 +482,7 @@ class Order {
        LEFT JOIN product_groups pg ON psb.group_id   = pg.id
        LEFT JOIN suppliers     sup ON od.supplier_id = sup.id
        LEFT JOIN stock_controls sc ON od.stock_control_id = sc.id
+       LEFT JOIN branches      scb ON sc.branch_id = scb.id
        LEFT JOIN conditions    cond ON sc.condition_id = cond.id
        WHERE od.order_control_id = $1
        ORDER BY od.display_name`,
@@ -463,27 +513,10 @@ class Order {
       const detail = result.rows[0];
       if (!detail) throw new Error("Item de orden no encontrado");
 
-      // Recalcular total de la orden
+      // Recalcular total de la orden. El ESTADO de la orden NO se toca: en el
+      // flujo de gestion de compras los estados son manuales (Variante B); la
+      // recepcion solo registra cantidades.
       await Order.recalcCostEstimate(detail.order_control_id, client);
-
-      // Actualizar estado de la orden segun recepcion
-      await client.query(
-        `UPDATE orders_controls
-         SET status = CASE
-           WHEN (
-             SELECT COUNT(*) FROM order_details
-             WHERE order_control_id = $1 AND quantity_received < quantity_ordered
-           ) = 0 THEN 'completed'
-           WHEN (
-             SELECT SUM(quantity_received) FROM order_details
-             WHERE order_control_id = $1
-           ) > 0 THEN 'partial'
-           ELSE status
-         END,
-         updated_at = NOW()
-         WHERE id = $1`,
-        [detail.order_control_id]
-      );
 
       await client.query("COMMIT");
       return detail.order_control_id;
@@ -497,8 +530,9 @@ class Order {
 
   /**
    * Marca TODOS los items de una orden como recibidos en su totalidad
-   * (quantity_received = quantity_ordered) en una sola transaccion y deja la
-   * orden en 'completed'. Atomico: una sola llamada en vez de N por item.
+   * (quantity_received = quantity_ordered) en una sola transaccion. Atomico: una
+   * sola llamada en vez de N por item. El ESTADO de la orden NO se cambia: en el
+   * flujo de gestion de compras (Variante B) el paso a 'finalizado' es manual.
    */
   static async receiveAll(orderId) {
     const client = await pool.connect();
@@ -516,13 +550,6 @@ class Order {
       );
 
       await Order.recalcCostEstimate(orderId, client);
-
-      await client.query(
-        `UPDATE orders_controls
-         SET status = 'completed', updated_at = NOW()
-         WHERE id = $1`,
-        [orderId]
-      );
 
       await client.query("COMMIT");
     } catch (err) {
@@ -572,6 +599,84 @@ class Order {
       }
 
       await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Devuelve la orden (cabecera) a la que pertenece un order_detail. Util para
+   * validar acceso/estado antes de operar sobre un item.
+   */
+  static async findByDetailId(detailId) {
+    const result = await pool.query(
+      `SELECT oc.*
+       FROM order_details od
+       JOIN orders_controls oc ON od.order_control_id = oc.id
+       WHERE od.id = $1`,
+      [detailId]
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Borra UN item (order_detail) de una orden. Si su stock_control queda sin
+   * ningun otro detalle, lo reabre (ordered_at=NULL) para volver a hacerlo
+   * pedible en su control. Si la orden queda sin items, la elimina tambien.
+   * Devuelve { orderId, orderDeleted } para que el controller decida la respuesta.
+   * Respeta el caso Hub: un control con linea interna + externa NO se reabre al
+   * borrar solo una de las dos (queda la otra referenciandolo).
+   */
+  static async deleteDetail(detailId) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Datos del detalle a borrar (orden y control asociados).
+      const detRes = await client.query(
+        `SELECT order_control_id, stock_control_id
+         FROM order_details WHERE id = $1`,
+        [detailId]
+      );
+      const det = detRes.rows[0];
+      if (!det) throw new Error("Item de orden no encontrado");
+
+      const orderId = det.order_control_id;
+      const stockControlId = det.stock_control_id;
+
+      await client.query("DELETE FROM order_details WHERE id = $1", [detailId]);
+
+      // Reabrir el control si ya no le queda NINGUN detalle (respeta Hub).
+      if (stockControlId) {
+        await client.query(
+          `UPDATE stock_controls sc
+           SET ordered_at = NULL, order_detail_id = NULL, updated_at = NOW()
+           WHERE sc.id = $1
+             AND NOT EXISTS (
+               SELECT 1 FROM order_details od WHERE od.stock_control_id = sc.id
+             )`,
+          [stockControlId]
+        );
+      }
+
+      // Si la orden quedo vacia, eliminarla; sino recalcular su total.
+      const remaining = await client.query(
+        "SELECT COUNT(*)::int AS n FROM order_details WHERE order_control_id = $1",
+        [orderId]
+      );
+      let orderDeleted = false;
+      if (remaining.rows[0].n === 0) {
+        await client.query("DELETE FROM orders_controls WHERE id = $1", [orderId]);
+        orderDeleted = true;
+      } else {
+        await Order.recalcCostEstimate(orderId, client);
+      }
+
+      await client.query("COMMIT");
+      return { orderId, orderDeleted };
     } catch (err) {
       await client.query("ROLLBACK");
       throw err;
