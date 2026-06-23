@@ -42,7 +42,21 @@ function SummaryCard({ icon, label, value, color, onClick }) {
     </CardContent>
   );
   return (
-    <Card variant="outlined" sx={{ minWidth: 220, flex: '1 1 220px' }}>
+    <Card
+      variant="outlined"
+      sx={{
+        // 4 tarjetas por fila en desktop, 2 en tablet, 1 en móvil. El gap del
+        // Stack es 16px (spacing=2); para 4 columnas se descuentan 12px por celda.
+        flexGrow: 1,
+        flexShrink: 1,
+        flexBasis: {
+          xs: '100%',
+          sm: 'calc(50% - 8px)',
+          md: 'calc(25% - 12px)',
+        },
+        minWidth: 200,
+      }}
+    >
       {onClick ? <CardActionArea onClick={onClick}>{content}</CardActionArea> : content}
     </Card>
   );
