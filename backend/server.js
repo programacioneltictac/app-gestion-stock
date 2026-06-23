@@ -81,6 +81,23 @@ app.use("/api/settings", settingRoutes);
 const alertRoutes = require("./routes/alerts");
 app.use("/api/alerts", authenticateToken, alertRoutes);
 
+// ==================== FRONTEND (produccion) ====================
+// En produccion el backend sirve el build de Vite (react-frontend/dist).
+// El frontend usa rutas relativas (/api), asi que comparten origen y no hay CORS.
+if (process.env.NODE_ENV === "production") {
+  const frontendDist = path.join(__dirname, "..", "react-frontend", "dist");
+  app.use(express.static(frontendDist));
+
+  // Fallback SPA: cualquier ruta que no sea /api devuelve index.html
+  // para que React Router maneje el enrutado del lado del cliente.
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || req.path.startsWith("/api")) {
+      return next();
+    }
+    res.sendFile(path.join(frontendDist, "index.html"));
+  });
+}
+
 // ==================== MANEJO DE ERRORES ====================
 
 app.use(notFoundHandler);
