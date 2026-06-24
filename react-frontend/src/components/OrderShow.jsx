@@ -18,7 +18,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
-import { useParams, useNavigate } from 'react-router';
+import { useParams, useNavigate, useLocation } from 'react-router';
 import { useDialogs } from '../hooks/useDialogs/useDialogs';
 import useNotifications from '../hooks/useNotifications/useNotifications';
 import { useAuth } from '../context/AuthContext';
@@ -48,9 +48,18 @@ const formatCurrency = (value) =>
 export default function OrderShow() {
   const { orderId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const dialogs = useDialogs();
   const notifications = useNotifications();
   const { user } = useAuth();
+
+  // Tab de origen (Proveedores / Nodo Hub) para que "Volver" regrese al mismo.
+  // Lo pasa OrderList vía state al abrir la orden; si no viene (acceso directo),
+  // se vuelve a /orders sin tab y la lista usa su default.
+  const fromTab = location.state?.fromTab;
+  const backToList = React.useCallback(() => {
+    navigate(fromTab ? `/orders?tab=${fromTab}` : '/orders');
+  }, [navigate, fromTab]);
 
   const [order, setOrder] = React.useState(null);
   const [items, setItems] = React.useState([]);
@@ -86,11 +95,11 @@ export default function OrderShow() {
     try {
       await deleteOrder(order.id);
       notifications.show('Orden eliminada', { severity: 'success', autoHideDuration: 3000 });
-      navigate('/orders');
+      backToList();
     } catch (err) {
       notifications.show(`Error: ${err.message}`, { severity: 'error', autoHideDuration: 5000 });
     }
-  }, [order, dialogs, notifications, navigate]);
+  }, [order, dialogs, notifications, backToList]);
 
   // Sincronizar el Autocomplete de estado cuando la orden cambia
   React.useEffect(() => {
@@ -128,7 +137,7 @@ export default function OrderShow() {
       const { orderDeleted } = await deleteOrderItem(item.id);
       if (orderDeleted) {
         notifications.show('Ítem quitado; la orden quedó vacía y fue eliminada', { severity: 'success', autoHideDuration: 4000 });
-        navigate('/orders');
+        backToList();
       } else {
         notifications.show('Ítem quitado de la orden', { severity: 'success', autoHideDuration: 3000 });
         loadData();
@@ -136,7 +145,7 @@ export default function OrderShow() {
     } catch (err) {
       notifications.show(`Error: ${err.message}`, { severity: 'error', autoHideDuration: 4000 });
     }
-  }, [dialogs, notifications, navigate, loadData]);
+  }, [dialogs, notifications, backToList, loadData]);
 
   React.useEffect(() => {
     loadData();
@@ -483,7 +492,7 @@ export default function OrderShow() {
               Eliminar
             </ActionButton>
           )}
-          <ActionButton icon={<ArrowBackIcon />} onClick={() => navigate('/orders')}>
+          <ActionButton icon={<ArrowBackIcon />} onClick={backToList}>
             Volver
           </ActionButton>
         </Stack>

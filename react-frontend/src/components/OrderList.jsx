@@ -34,7 +34,7 @@ export default function OrderList() {
 
   // Estado inicial opcional desde la URL (?status=...), p.ej. acceso directo
   // desde las tarjetas del dashboard ("Órdenes pendientes" / "autorizadas").
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialStatus = searchParams.get('status') || '';
 
   const [orders, setOrders] = React.useState([]);
@@ -48,7 +48,22 @@ export default function OrderList() {
   const isEmployee = user?.role === 'employee';
   // Las ordenes externas (proveedor) las gestiona compras: solo admin/manager.
   // El empleado solo ve el tab interno (Hub).
-  const [activeTab, setActiveTab] = React.useState(isEmployee ? 'internal' : 'external');
+  // La pestaña activa vive en la URL (?tab=internal|external) para que al volver
+  // desde una orden se conserve (el "Volver" de OrderShow vuelve al mismo tab).
+  const defaultTab = isEmployee ? 'internal' : 'external';
+  const tabFromUrl = searchParams.get('tab');
+  const activeTab = tabFromUrl === 'internal' || tabFromUrl === 'external' ? tabFromUrl : defaultTab;
+
+  const handleTabChange = React.useCallback(
+    (_, val) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', val);
+        return next;
+      });
+    },
+    [setSearchParams]
+  );
 
   const loadData = React.useCallback(async () => {
     setError(null);
@@ -94,9 +109,11 @@ export default function OrderList() {
 
   const filteredOrders = activeTab === 'internal' ? internalOrders : externalOrders;
 
+  // Al abrir una orden, recordamos el tab de origen para que su "Volver"
+  // regrese a la misma pestaña (Proveedores / Nodo Hub).
   const handleRowView = React.useCallback(
-    (order) => () => navigate(`/orders/${order.id}`),
-    [navigate]
+    (order) => () => navigate(`/orders/${order.id}`, { state: { fromTab: activeTab } }),
+    [navigate, activeTab]
   );
 
   const handleRowDelete = React.useCallback(
@@ -288,7 +305,7 @@ export default function OrderList() {
           El tab de proveedores es solo para admin/manager (compras). */}
       <Tabs
         value={activeTab}
-        onChange={(_, val) => setActiveTab(val)}
+        onChange={handleTabChange}
         sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
       >
         {!isEmployee && <Tab value="external" label={`Proveedores (${externalOrders.length})`} />}
