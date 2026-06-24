@@ -23,6 +23,14 @@ class StockService {
     return apiClient.put('/stock/monthly-control/complete', { control_id: controlId });
   }
 
+  async discontinueControl(controlId) {
+    return apiClient.put('/stock/monthly-control/discontinue', { control_id: controlId });
+  }
+
+  async getOpenOrdersCount(controlId) {
+    return apiClient.get(`/stock/monthly-control/${controlId}/open-orders-count`);
+  }
+
   async getControlHistory(branchId) {
     // Límite amplio: la grilla muestra abiertos (draft) + historial en una sola lista.
     const params = branchId ? `?branch_id=${branchId}&limit=200` : '?limit=200';

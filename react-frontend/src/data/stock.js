@@ -12,6 +12,8 @@ function transformControlFromBackend(control) {
       ? "Borrador"
       : control.status === "completed"
       ? "Completado"
+      : control.status === "discontinued"
+      ? "Discontinuado"
       : control.status;
 
   return {
@@ -93,6 +95,22 @@ export async function createMonthlyControl(branchId, categoryId) {
 export async function completeMonthlyControl(controlId) {
   const data = await stockService.completeControl(controlId);
   return transformControlFromBackend(data.control);
+}
+
+// Discontinúa un control completado. Devuelve el control transformado y la
+// cantidad de órdenes abiertas que tenía vinculadas (informativo).
+export async function discontinueMonthlyControl(controlId) {
+  const data = await stockService.discontinueControl(controlId);
+  return {
+    control: transformControlFromBackend(data.control),
+    openOrders: Number(data.open_orders || 0),
+  };
+}
+
+// Cantidad de órdenes abiertas vinculadas al control (para avisar antes de discontinuar).
+export async function getOpenOrdersCount(controlId) {
+  const data = await stockService.getOpenOrdersCount(controlId);
+  return Number(data.count || 0);
 }
 
 export async function deleteMonthlyControl(controlId) {

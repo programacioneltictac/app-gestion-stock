@@ -148,6 +148,58 @@ const completeMonthlyControl = async (req, res) => {
   }
 };
 
+// PUT /api/stock/monthly-control/discontinue
+// Discontinúa un control COMPLETADO: queda de archivo (sync no lo toca, no genera
+// órdenes). Las órdenes ya creadas siguen vivas en /orders; solo se avisa cuántas
+// abiertas hay (no bloquea).
+const discontinueMonthlyControl = async (req, res) => {
+  try {
+    const { control_id } = req.body;
+    if (!control_id) {
+      return res.status(400).json({ status: "error", message: "control_id es requerido" });
+    }
+
+    const control = await MonthlyControl.findById(control_id);
+    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
+    if (!canAccessBranch(req.user, control.branch_id)) {
+      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
+    }
+    if (control.status !== "completed") {
+      return res.status(400).json({ status: "error", message: "Solo se pueden discontinuar controles completados" });
+    }
+
+    const openOrders = await MonthlyControl.countOpenOrders(control_id);
+    const updatedControl = await MonthlyControl.discontinue(control_id);
+    console.log(`Control discontinuado - ID: ${control_id}, Órdenes abiertas: ${openOrders}, Usuario: ${req.user.username}`);
+    res.json({
+      status: "success",
+      message: "Control discontinuado",
+      open_orders: openOrders,
+      control: updatedControl,
+    });
+  } catch (error) {
+    handleControllerError(res, error, "Error discontinuando control:");
+  }
+};
+
+// GET /api/stock/monthly-control/:control_id/open-orders-count
+// Cantidad de órdenes abiertas vinculadas al control. Lo usa el front para
+// avisar antes de discontinuar.
+const getOpenOrdersCount = async (req, res) => {
+  try {
+    const { control_id } = req.params;
+    const control = await MonthlyControl.findById(control_id);
+    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
+    if (!canAccessBranch(req.user, control.branch_id)) {
+      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
+    }
+    const count = await MonthlyControl.countOpenOrders(control_id);
+    res.json({ status: "success", count });
+  } catch (error) {
+    handleControllerError(res, error, "Error contando órdenes abiertas:");
+  }
+};
+
 // GET /api/stock/monthly-control/history
 const getMonthlyControlHistory = async (req, res) => {
   try {
@@ -400,6 +452,8 @@ module.exports = {
   getMonthlyControlById,
   getDiscontinued,
   completeMonthlyControl,
+  discontinueMonthlyControl,
+  getOpenOrdersCount,
   getMonthlyControlHistory,
   deleteMonthlyControl,
   getStockItems,

@@ -30,10 +30,13 @@ class MonthlyControl {
     return result.rows[0] || null;
   }
 
-  // ¿Hay un control 'draft' de este rubro en esta sucursal? (unicidad por rubro activo).
+  // ¿Hay un control ACTIVO (draft o completed) de este rubro en esta sucursal?
+  // Unicidad por rubro: no pueden coexistir un draft y un completed del mismo
+  // rubro/sucursal. Un 'discontinued' NO cuenta (es archivo), así que para
+  // "renovar" un rubro se discontinúa el actual y recién ahí se abre uno nuevo.
   static async existsOpenForCategory(branch_id, category_id) {
     const result = await pool.query(
-      "SELECT id FROM monthly_controls WHERE branch_id = $1 AND category_id = $2 AND status = 'draft'",
+      "SELECT id FROM monthly_controls WHERE branch_id = $1 AND category_id = $2 AND status IN ('draft', 'completed')",
       [branch_id, category_id]
     );
     return result.rows[0] || null;
@@ -76,6 +79,36 @@ class MonthlyControl {
       [id]
     );
     return result.rows[0];
+  }
+
+  // Discontinúa un control completado: queda de archivo. El sync deja de
+  // actualizar su stock y no se pueden generar órdenes desde él. Es terminal.
+  static async discontinue(id) {
+    const result = await pool.query(
+      `UPDATE monthly_controls
+       SET status = 'discontinued', updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+    return result.rows[0];
+  }
+
+  // Cuenta las órdenes de reposición ABIERTAS vinculadas a este control (las que
+  // todavía requieren gestión: cualquier estado salvo 'finalizado'/'cancelado').
+  // El vínculo control→orden es por order_details.stock_control_id. Sirve para
+  // avisar al usuario antes de discontinuar (las órdenes siguen vivas en /orders).
+  static async countOpenOrders(control_id) {
+    const result = await pool.query(
+      `SELECT COUNT(DISTINCT oc.id) AS count
+       FROM orders_controls oc
+       JOIN order_details od ON od.order_control_id = oc.id
+       JOIN stock_controls sc ON sc.id = od.stock_control_id
+       WHERE sc.monthly_control_id = $1
+         AND oc.status NOT IN ('finalizado', 'cancelado')`,
+      [control_id]
+    );
+    return parseInt(result.rows[0].count, 10) || 0;
   }
 
   static async getHistory(branch_id, limit = 12) {

@@ -19,6 +19,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
+import ArchiveIcon from "@mui/icons-material/Archive";
 import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useDialogs } from "../hooks/useDialogs/useDialogs";
 import useNotifications from "../hooks/useNotifications/useNotifications";
@@ -27,6 +28,8 @@ import {
   upsertStockItem,
   deleteStockItem,
   completeMonthlyControl,
+  discontinueMonthlyControl,
+  getOpenOrdersCount,
   getAvailableProducts,
   getConditions,
   getControlById,
@@ -321,6 +324,46 @@ export default function StockControlShow() {
     }
   }, [controlId, dialogs, notifications, loadData]);
 
+  const handleDiscontinueControl = React.useCallback(async () => {
+    // Avisar cuántas órdenes abiertas tiene vinculadas (siguen vivas en /orders).
+    let openOrders = 0;
+    try {
+      openOrders = await getOpenOrdersCount(Number(controlId));
+    } catch {
+      // Si falla el conteo, seguimos sin el aviso (no es bloqueante).
+    }
+
+    const ordersMsg =
+      openOrders > 0
+        ? ` Este control tiene ${openOrders} ${openOrders === 1 ? "orden abierta" : "órdenes abiertas"}; al discontinuar dejará de actualizarse, pero ${openOrders === 1 ? "esa orden sigue" : "esas órdenes siguen"} en /orders.`
+        : "";
+
+    const confirmed = await dialogs.confirm(
+      `Al discontinuar, el control deja de actualizarse con el stock y no podrá generar órdenes. Esta acción no se puede deshacer.${ordersMsg}`,
+      {
+        title: "¿Discontinuar control?",
+        severity: "warning",
+        okText: "Discontinuar",
+        cancelText: "Cancelar",
+      }
+    );
+    if (confirmed) {
+      try {
+        await discontinueMonthlyControl(Number(controlId));
+        notifications.show("Control discontinuado", {
+          severity: "success",
+          autoHideDuration: 3000,
+        });
+        loadData();
+      } catch (err) {
+        notifications.show(`Error al discontinuar: ${err.message}`, {
+          severity: "error",
+          autoHideDuration: 3000,
+        });
+      }
+    }
+  }, [controlId, dialogs, notifications, loadData]);
+
   const columns = React.useMemo(
     () => [
       { field: "displayName", headerName: "Producto", flex: 1, minWidth: 200 },
@@ -505,7 +548,16 @@ export default function StockControlShow() {
               Completar
             </ActionButton>
           )}
-          {control && orderableIds.length > 0 && (
+          {control?.status === "completed" && (
+            <ActionButton
+              variant="secondary"
+              icon={<ArchiveIcon />}
+              onClick={handleDiscontinueControl}
+            >
+              Discontinuar
+            </ActionButton>
+          )}
+          {control && control.status !== "discontinued" && orderableIds.length > 0 && (
             <ActionButton
               variant="primary"
               color="warning"
@@ -526,7 +578,11 @@ export default function StockControlShow() {
         <Stack direction="row" spacing={2} sx={{ mb: 2 }} alignItems="center" flexWrap="wrap">
           <Chip
             label={control.statusName}
-            color={control.status === "completed" ? "success" : "warning"}
+            color={
+              control.status === "completed" ? "success"
+                : control.status === "discontinued" ? "default"
+                : "warning"
+            }
             size="small"
           />
           <Typography variant="body2">Total: <strong>{stats.total}</strong></Typography>

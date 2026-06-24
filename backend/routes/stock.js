@@ -15,6 +15,9 @@ router.get("/monthly-control/current", stockController.getCurrentMonthlyControl)
 // PUT /api/stock/monthly-control/complete
 router.put("/monthly-control/complete", stockController.completeMonthlyControl);
 
+// PUT /api/stock/monthly-control/discontinue — discontinúa un control completado.
+router.put("/monthly-control/discontinue", stockController.discontinueMonthlyControl);
+
 // GET /api/stock/monthly-control/history
 router.get("/monthly-control/history", stockController.getMonthlyControlHistory);
 
@@ -22,6 +25,10 @@ router.get("/monthly-control/history", stockController.getMonthlyControlHistory)
 // del mismo rubro NO incluidos en el control (solo lectura). Antes de la ruta
 // genérica :control_id para que no la capture.
 router.get("/monthly-control/:control_id/discontinued", stockController.getDiscontinued);
+
+// GET /api/stock/monthly-control/:control_id/open-orders-count — cantidad de
+// órdenes abiertas vinculadas (para avisar antes de discontinuar).
+router.get("/monthly-control/:control_id/open-orders-count", stockController.getOpenOrdersCount);
 
 // GET /api/stock/monthly-control/:control_id — detalle de un control por id.
 // Debe ir DESPUÉS de las rutas literales (current, history) para no capturarlas.

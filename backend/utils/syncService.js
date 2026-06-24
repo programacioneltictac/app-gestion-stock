@@ -425,9 +425,11 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
       }
     }
 
-    // Actualizar stock_current en controles DRAFT de esta sucursal.
-    // Controles completados no se tocan. Los umbrales de estado vienen de
-    // app_settings (con fallback 70/120) — misma fuente que StockControl.upsert.
+    // Actualizar stock_current en controles ACTIVOS (draft + completed) de esta
+    // sucursal. Un control 'completed' sigue recibiendo stock real del sync (ya
+    // no se edita, pero sigue vivo); solo 'discontinued' queda congelado. Los
+    // umbrales de estado vienen de app_settings (con fallback 70/120) — misma
+    // fuente que StockControl.upsert.
     const { orderPct, overstockPct } = await StockControl.getThresholds();
     await client.query(
       `UPDATE stock_controls
@@ -444,7 +446,7 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
        WHERE stock_controls.product_stock_id = psb.id
          AND stock_controls.monthly_control_id = mc.id
          AND mc.branch_id = $1
-         AND mc.status = 'draft'`,
+         AND mc.status IN ('draft', 'completed')`,
       [branch.id, orderPct, overstockPct],
     );
 
