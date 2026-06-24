@@ -1,6 +1,7 @@
 import * as React from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardActionArea from '@mui/material/CardActionArea';
 import CardContent from '@mui/material/CardContent';
@@ -101,6 +102,23 @@ export default function Dashboard() {
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 6 }}>
           <CircularProgress />
         </Box>
+      </PageContainer>
+    );
+  }
+
+  // Si la carga falló (p. ej. /api/alerts dio timeout o 5xx transitorio),
+  // `data` queda en null. Mostramos el error con opción de reintentar sin
+  // intentar renderizar las listas (que reventarían al leer data.muyPrioritarios).
+  if (!data) {
+    return (
+      <PageContainer title="Dashboard" breadcrumbs={[{ title: 'Dashboard' }]}>
+        <Alert
+          severity="error"
+          sx={{ mt: 2 }}
+          action={<Button color="inherit" size="small" onClick={load}>Reintentar</Button>}
+        >
+          {error?.message || 'No se pudieron cargar las alertas. Volvé a intentar.'}
+        </Alert>
       </PageContainer>
     );
   }
