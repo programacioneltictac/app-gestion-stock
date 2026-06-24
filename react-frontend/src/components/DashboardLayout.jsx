@@ -2,7 +2,9 @@ import * as React from 'react';
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import Box from '@mui/material/Box';
+import Link from '@mui/material/Link';
 import Toolbar from '@mui/material/Toolbar';
+import Typography from '@mui/material/Typography';
 import { Outlet } from 'react-router';
 import DashboardHeader from './DashboardHeader';
 import DashboardSidebar from './DashboardSidebar';
@@ -86,6 +88,30 @@ export default function DashboardLayout() {
           }}
         >
           <Outlet />
+          {/* Atribución del favicon (licencia gratuita de Flaticon). */}
+          <Box
+            component="footer"
+            sx={{
+              mt: 'auto',
+              py: 1,
+              px: 2,
+              textAlign: 'center',
+              displayPrint: 'none',
+            }}
+          >
+            <Typography variant="caption" color="text.disabled">
+              Ícono creado por{' '}
+              <Link
+                href="https://www.flaticon.es/iconos-gratis/almacen-de-datos"
+                target="_blank"
+                rel="noopener noreferrer"
+                color="inherit"
+                underline="hover"
+              >
+                Freepik - Flaticon
+              </Link>
+            </Typography>
+          </Box>
         </Box>
       </Box>
     </Box>
