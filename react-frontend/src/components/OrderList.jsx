@@ -320,7 +320,7 @@ export default function OrderList() {
             rows={filteredOrders}
             columns={columns}
             disableRowSelectionOnClick
-            onRowClick={({ row }) => navigate(`/orders/${row.id}`)}
+            onRowClick={({ row }) => navigate(`/orders/${row.id}`, { state: { fromTab: activeTab } })}
             loading={isLoading}
             autoHeight
             pageSizeOptions={[10, 25, 50]}
