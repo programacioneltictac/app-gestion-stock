@@ -22,7 +22,8 @@ class Alert {
   /**
    * Métricas de alertas tempranas. `branchId` opcional: si viene (employee),
    * limita todo a esa sucursal; si es null (admin/manager), abarca todas.
-   * Solo considera controles ABIERTOS (draft) e ítems no pedidos.
+   * Considera controles ACTIVOS (draft + completed) e ítems no pedidos; los
+   * 'discontinued' quedan fuera (están apagados a propósito).
    * @returns {Promise<object>} { muyPrioritarios, criticalBranches,
    *   pendingOrders, authorizedOrders, avgOrderAgeDays, openOrdersTotal,
    *   avgCompliance, brandTrialsDue, discontinuedValue }
@@ -32,7 +33,7 @@ class Alert {
     const params = branchId ? [branchId] : [];
 
     // 1) Faltantes MUY PRIORITARIOS por sucursal+rubro (estado generar_pedido,
-    //    no pedidos, en controles draft). Navega al control puntual.
+    //    no pedidos, en controles activos draft+completed). Navega al control puntual.
     const muyPrioritarios = await pool.query(
       `SELECT mc.id          AS control_id,
               mc.branch_id,
@@ -46,7 +47,7 @@ class Alert {
        WHERE sc.stock_status_id = 1
          AND sc.condition_id = ${MUY_PRIORITARIO_CONDITION_ID}
          AND sc.ordered_at IS NULL
-         AND mc.status = 'draft'
+         AND mc.status IN ('draft', 'completed')
          ${branchClause}
        GROUP BY mc.id, mc.branch_id, b.name, c.category_name
        ORDER BY faltantes DESC, b.name`,
@@ -54,7 +55,7 @@ class Alert {
     );
 
     // 2) Sucursales críticas: ranking por ítems en generar_pedido (no pedidos,
-    //    reponibles) en controles draft. Navega a los controles de la sucursal.
+    //    reponibles) en controles activos draft+completed. Navega a los controles de la sucursal.
     const criticalBranches = await pool.query(
       `SELECT mc.branch_id,
               b.name      AS branch_name,
@@ -66,7 +67,7 @@ class Alert {
        WHERE sc.stock_status_id = 1
          AND sc.ordered_at IS NULL
          AND sc.condition_id IS DISTINCT FROM ${NON_REPLENISHABLE_CONDITION_ID}
-         AND mc.status = 'draft'
+         AND mc.status IN ('draft', 'completed')
          ${branchClause}
        GROUP BY mc.branch_id, b.name, b.is_hub
        ORDER BY need_order_items DESC, b.name`,
@@ -103,8 +104,8 @@ class Alert {
     );
 
     // 4) Discontinuos valorizados por sucursal+rubro: stock*costo de productos
-    //    del rubro CON stock que NO están en el control draft (sobrante a
-    //    liquidar). Navega al control (tab Discontinuos).
+    //    del rubro CON stock que NO están en el control activo (draft+completed,
+    //    sobrante a liquidar). Navega al control (tab Discontinuos).
     const discontinuedValue = await pool.query(
       `SELECT mc.id        AS control_id,
               mc.branch_id,
@@ -119,7 +120,7 @@ class Alert {
        LEFT JOIN products p        ON psb.product_id = p.id
        LEFT JOIN product_groups pg ON psb.group_id = pg.id
        LEFT JOIN categories cg     ON pg.category_type = cg.category_name
-       WHERE mc.status = 'draft'
+       WHERE mc.status IN ('draft', 'completed')
          AND ( p.category_id = mc.category_id OR cg.id = mc.category_id )
          AND NOT EXISTS (
            SELECT 1 FROM stock_controls sc
@@ -133,8 +134,8 @@ class Alert {
     );
 
     // 5) Compliance promedio general: AVG del compliance de TODOS los items de
-    //    controles draft (todas las sucursales y rubros). Misma fórmula que
-    //    MonthlyControl.avg_compliance (require=0 => 100). Foto del estado actual.
+    //    controles activos draft+completed (todas las sucursales y rubros). Misma
+    //    fórmula que MonthlyControl.avg_compliance (require=0 => 100). Foto del estado actual.
     const avgCompliance = await pool.query(
       `SELECT ROUND(AVG(
                 CASE
@@ -144,7 +145,7 @@ class Alert {
               ))::int AS avg_compliance
        FROM stock_controls sc
        JOIN monthly_controls mc ON sc.monthly_control_id = mc.id
-       WHERE mc.status = 'draft' ${branchClause}`,
+       WHERE mc.status IN ('draft', 'completed') ${branchClause}`,
       params
     );
 
