@@ -20,6 +20,7 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import ArchiveIcon from "@mui/icons-material/Archive";
+import FileDownloadIcon from "@mui/icons-material/FileDownload";
 import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useDialogs } from "../hooks/useDialogs/useDialogs";
 import useNotifications from "../hooks/useNotifications/useNotifications";
@@ -36,6 +37,7 @@ import {
   getDiscontinuedProducts,
 } from "../data/stock";
 import { createOrderFromControl } from "../data/orders";
+import { exportStockControlToExcel } from "../utils/stockControlExcel";
 import PageContainer from "./PageContainer";
 import ActionButton from "./ActionButton";
 
@@ -143,20 +145,26 @@ export default function StockControlShow() {
     loadData();
   }, [loadData]);
 
+  const [isExporting, setIsExporting] = React.useState(false);
+
   // Carga (lazy) de discontinuos: solo la primera vez que se entra a la tab.
+  // Devuelve el array cargado (lo usa también la exportación a Excel).
   const loadDiscontinued = React.useCallback(async () => {
     setIsLoadingDisc(true);
     try {
       const data = await getDiscontinuedProducts(Number(controlId));
       setDiscontinued(data);
       setDiscLoaded(true);
+      return data;
     } catch (err) {
       notifications.show(`Error al cargar discontinuos: ${err.message}`, {
         severity: "error",
         autoHideDuration: 4000,
       });
+      throw err;
+    } finally {
+      setIsLoadingDisc(false);
     }
-    setIsLoadingDisc(false);
   }, [controlId, notifications]);
 
   const handleChangeTab = React.useCallback((_, val) => {
@@ -174,6 +182,23 @@ export default function StockControlShow() {
   const handleBack = React.useCallback(() => {
     navigate(`/stock-control/${branchId}`);
   }, [navigate, branchId]);
+
+  // Descarga el control completo a un .xlsx con dos hojas (Control + Discontinuos)
+  // en el mismo libro. Si los discontinuos aún no se cargaron (no se entró a la
+  // tab), se traen on-demand para que el libro salga completo.
+  const handleExportExcel = React.useCallback(async () => {
+    setIsExporting(true);
+    try {
+      const discData = discLoaded ? discontinued : await loadDiscontinued();
+      await exportStockControlToExcel(control, items, discData);
+    } catch (err) {
+      notifications.show(`Error al exportar: ${err.message}`, {
+        severity: "error",
+        autoHideDuration: 4000,
+      });
+    }
+    setIsExporting(false);
+  }, [control, items, discontinued, discLoaded, loadDiscontinued, notifications]);
 
   const handleUpsertItem = React.useCallback(async () => {
     if (!selectedProduct || stockRequire === "" || Number(stockRequire) < 0) return;
@@ -538,6 +563,17 @@ export default function StockControlShow() {
           <ActionButton icon={<ArrowBackIcon />} onClick={handleBack}>
             Volver
           </ActionButton>
+          {control && (
+            <ActionButton
+              variant="secondary"
+              icon={<FileDownloadIcon />}
+              loading={isExporting}
+              loadingText="Generando..."
+              onClick={handleExportExcel}
+            >
+              Descargar Excel
+            </ActionButton>
+          )}
           {control?.status === "draft" && (
             <ActionButton
               variant="primary"
