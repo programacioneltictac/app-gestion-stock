@@ -233,6 +233,22 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
     }
   }
 
+  // GUARD anti-vaciado: si NINGUNA categoría devolvió productos, NO tocar la BD.
+  // El sync resetea el stock a 0 y lo re-acumula desde la API; si la API vino
+  // vacía (token de IDUO vencido → responde 200 con [] sin `hayerror`, o API
+  // caída → todas las categorías fallan), re-acumular nada dejaría TODO el stock
+  // de la sucursal en 0 (y propagaría ese 0 a los controles activos) commiteando
+  // "con éxito". Una sucursal real siempre trae algo de alguna categoría; que las
+  // 7 den 0 a la vez no es un estado de negocio válido. Abortamos sin escribir,
+  // dejando el stock previo intacto, y marcamos error para que quede en el log.
+  if (rawProducts.length === 0) {
+    const err = new Error(
+      "La API no devolvió productos para ninguna categoría: stock NO actualizado (posible token de IDUO vencido o API caída). Se preserva el stock anterior.",
+    );
+    err.code = "EMPTY_API_RESPONSE";
+    throw err;
+  }
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -563,12 +579,23 @@ async function syncAllBranches() {
 
   const syncEndTs = Date.now();
   const totalElapsed = syncEndTs - syncStartTs;
+  const okCount = results.filter((r) => r.status === "ok").length;
+  const errorCount = results.filter((r) => r.status === "error").length;
   console.log(
     `\n========== Sincronización finalizada: ${new Date(syncEndTs).toISOString()} ==========`,
   );
+  console.log(`Sucursales OK: ${okCount} / ${results.length} (errores: ${errorCount})`);
+  if (errorCount > 0) {
+    // Resaltado para revisión por logs (sync automático): listar las que fallaron
+    // con su motivo. Una sucursal abortada por EMPTY_API_RESPONSE NO actualizó su
+    // stock (se preservó el anterior) — señal típica de token de IDUO vencido.
+    for (const r of results.filter((x) => x.status === "error")) {
+      console.warn(`  ⚠️  ${r.branch}: ${r.message}`);
+    }
+  }
   console.log(`Duración total: ${formatDuration(totalElapsed)}\n`);
 
-  return { results, elapsed_ms: totalElapsed };
+  return { results, elapsed_ms: totalElapsed, ok_count: okCount, error_count: errorCount };
 }
 
 module.exports = {
