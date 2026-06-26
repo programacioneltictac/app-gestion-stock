@@ -114,6 +114,19 @@ const server = app.listen(PORT, () => {
   console.log(`   - Audit logging`);
   console.log(`📦 Stock system endpoints available at /api/stock/`);
   console.log(`🏗️  Architecture: MVC (Model-View-Controller)`);
+
+  // Scheduler de sync automático (stock + compras a las 06:00 ART).
+  // Se activa SOLO con SYNC_SCHEDULE_ENABLED=true (opt-in explícito). Se configura
+  // en las env vars del servicio de Render; en local queda apagado por defecto
+  // para no dispararse en máquinas de desarrollo (NODE_ENV no se usa como gatillo
+  // porque el .env local puede tener NODE_ENV=production).
+  if (process.env.SYNC_SCHEDULE_ENABLED === "true") {
+    require("./utils/scheduler").startScheduler();
+  } else {
+    console.log(
+      "⏰ Scheduler de sync automático desactivado (SYNC_SCHEDULE_ENABLED != 'true').",
+    );
+  }
 });
 
 // Graceful shutdown
