@@ -54,6 +54,26 @@ class Brand {
     };
   }
 
+  // Crea una marca. Lanza error con code 'DUP' si ya existe (UNIQUE brand_name).
+  static async create({ brandName, isGroupable = false }) {
+    try {
+      const result = await pool.query(
+        `INSERT INTO brands (brand_name, is_groupable, is_active)
+         VALUES ($1, $2, true)
+         RETURNING id, brand_name, is_groupable, supplier_id`,
+        [brandName, isGroupable]
+      );
+      return result.rows[0];
+    } catch (err) {
+      if (err.code === "23505") {
+        const dup = new Error("Ya existe una marca con ese nombre");
+        dup.code = "DUP";
+        throw dup;
+      }
+      throw err;
+    }
+  }
+
   static async updateIsGroupable(id, isGroupable) {
     const result = await pool.query(
       "UPDATE brands SET is_groupable = $1, updated_at = NOW() WHERE id = $2 AND is_active = true RETURNING id, brand_name, is_groupable",

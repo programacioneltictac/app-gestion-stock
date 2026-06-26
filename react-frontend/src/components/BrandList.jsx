@@ -2,17 +2,27 @@ import * as React from "react";
 import Alert from "@mui/material/Alert";
 import Autocomplete from "@mui/material/Autocomplete";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import Stack from "@mui/material/Stack";
 import Switch from "@mui/material/Switch";
 import TextField from "@mui/material/TextField";
 import { DataGrid } from "@mui/x-data-grid";
 import { dataGridSx, dataGridLoadingSlotProps } from "./dataGridStyles";
+import AddIcon from "@mui/icons-material/Add";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import useNotifications from "../hooks/useNotifications/useNotifications";
+import { useAuth } from "../context/AuthContext";
 import apiClient from "../services/apiClient";
 import { getSuppliers, setBrandSupplier } from "../data/suppliers";
+import { createBrand } from "../data/catalogs";
 import PageContainer from "./PageContainer";
+import ActionButton from "./ActionButton";
 
 const INITIAL_PAGE_SIZE = 50;
 
@@ -34,6 +44,14 @@ export default function BrandList() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const notifications = useNotifications();
+  const { hasRole } = useAuth();
+  const isAdmin = hasRole("admin");
+
+  // Diálogo de alta de marca
+  const [createOpen, setCreateOpen] = React.useState(false);
+  const [newName, setNewName] = React.useState("");
+  const [newGroupable, setNewGroupable] = React.useState(false);
+  const [isCreating, setIsCreating] = React.useState(false);
 
   const [paginationModel, setPaginationModel] = React.useState({
     page: searchParams.get("page") ? Number(searchParams.get("page")) : 0,
@@ -157,6 +175,35 @@ export default function BrandList() {
     [notifications]
   );
 
+  const handleOpenCreate = React.useCallback(() => {
+    setNewName("");
+    setNewGroupable(false);
+    setCreateOpen(true);
+  }, []);
+
+  const handleConfirmCreate = React.useCallback(async () => {
+    const name = newName.trim();
+    if (!name) return;
+    setIsCreating(true);
+    try {
+      await createBrand({ brandName: name, isGroupable: newGroupable });
+      setCreateOpen(false);
+      notifications.show(
+        newGroupable
+          ? `Marca "${name}" creada. Recordá re-sincronizar para que se agrupen sus productos.`
+          : `Marca "${name}" creada.`,
+        { severity: "success", autoHideDuration: 5000 }
+      );
+      await loadData();
+    } catch (err) {
+      notifications.show(`Error al crear la marca: ${err.message}`, {
+        severity: "error",
+        autoHideDuration: 4000,
+      });
+    }
+    setIsCreating(false);
+  }, [newName, newGroupable, notifications, loadData]);
+
   const columns = React.useMemo(
     () => [
       { field: "id", headerName: "ID", width: 70 },
@@ -215,6 +262,13 @@ export default function BrandList() {
     <PageContainer
       title="Marcas"
       breadcrumbs={[{ title: "Marcas" }]}
+      actions={
+        isAdmin ? (
+          <ActionButton variant="primary" icon={<AddIcon />} onClick={handleOpenCreate}>
+            Nueva marca
+          </ActionButton>
+        ) : null
+      }
     >
       <Box sx={{ flex: 1, width: "100%" }}>
         {error ? (
@@ -244,6 +298,52 @@ export default function BrandList() {
           />
         )}
       </Box>
+
+      {/* Diálogo de alta de marca (solo admin) */}
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Nueva marca</DialogTitle>
+        <DialogContent>
+          <TextField
+            sx={{ mt: 1 }}
+            label="Nombre de la marca"
+            placeholder="Ej: AFA OFICIAL"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            fullWidth
+            autoFocus
+            inputProps={{ maxLength: 100 }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newName.trim() && !isCreating) handleConfirmCreate();
+            }}
+          />
+          <FormControlLabel
+            sx={{ mt: 1 }}
+            control={
+              <Switch
+                checked={newGroupable}
+                onChange={(e) => setNewGroupable(e.target.checked)}
+              />
+            }
+            label="Agrupable"
+          />
+          <Alert severity="info" sx={{ mt: 1 }}>
+            El nombre debe coincidir con cómo aparece en los productos de IDUO. Tras crear
+            una marca agrupable, re-sincronizá para que se asocien y agrupen sus productos.
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCreateOpen(false)} color="inherit">
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleConfirmCreate}
+            variant="contained"
+            disabled={!newName.trim() || isCreating}
+          >
+            {isCreating ? "Creando..." : "Crear"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </PageContainer>
   );
 }

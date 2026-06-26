@@ -61,6 +61,15 @@ export async function getBrands() {
   }
 }
 
+// Create a new brand (admin only). Returns the created brand.
+export async function createBrand({ brandName, isGroupable }) {
+  const data = await apiClient.post('/stock/catalogs/brands', {
+    brandName,
+    isGroupable: !!isGroupable,
+  });
+  return data.data;
+}
+
 // Product statuses (hard-coded as they are in the frontend)
 export function getProductStatuses() {
   return [

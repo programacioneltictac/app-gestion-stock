@@ -69,6 +69,32 @@ const getBrandsList = async (req, res) => {
   }
 };
 
+// POST /api/stock/catalogs/brands
+const createBrand = async (req, res) => {
+  try {
+    const { brandName, isGroupable } = req.body;
+
+    const name = typeof brandName === "string" ? brandName.trim() : "";
+    if (!name) {
+      return res.status(400).json({ status: "error", message: "El nombre de la marca es obligatorio" });
+    }
+    if (name.length > 100) {
+      return res.status(400).json({ status: "error", message: "El nombre no puede superar 100 caracteres" });
+    }
+    if (isGroupable !== undefined && typeof isGroupable !== "boolean") {
+      return res.status(400).json({ status: "error", message: "isGroupable debe ser booleano" });
+    }
+
+    const created = await Brand.create({ brandName: name, isGroupable: !!isGroupable });
+    res.status(201).json({ status: "success", data: created });
+  } catch (error) {
+    if (error.code === "DUP") {
+      return res.status(409).json({ status: "error", message: error.message });
+    }
+    handleControllerError(res, error, "Error creando marca:");
+  }
+};
+
 // PATCH /api/stock/catalogs/brands/:id/is-groupable
 const updateBrandIsGroupable = async (req, res) => {
   try {
@@ -117,6 +143,7 @@ module.exports = {
   getConditions,
   getBrands,
   getBrandsList,
+  createBrand,
   updateBrandIsGroupable,
   updateBrandSupplier,
 };
