@@ -116,6 +116,9 @@ function transformOrderItemFromBackend(item) {
     stockCurrent:     Number(item.stock_current || 0),
     currentAvgCost:   item.current_avg_cost != null ? Number(item.current_avg_cost) : null,
     notes:            item.notes || '',
+    // Finalización de gestión (solo órdenes Hub): cuándo y quién lo finalizó.
+    completedAt:        item.completed_at || null,
+    completedByUsername: item.completed_by_username || '',
     updatedAt:        item.updated_at,
   };
 }
@@ -155,6 +158,16 @@ export async function updateOrderItemReceived(detailId, quantityReceived, notes 
 
 export async function receiveAllOrderItems(orderId) {
   const data = await orderService.receiveAll(orderId);
+  return {
+    order: transformOrderFromBackend(data.order),
+    items: (data.items || []).map(transformOrderItemFromBackend),
+  };
+}
+
+// Finaliza (completed=true) o reabre (false) los items indicados de una orden Hub.
+// Devuelve la orden y los items frescos.
+export async function completeOrderItems(orderId, detailIds, completed) {
+  const data = await orderService.completeItems(orderId, detailIds, completed);
   return {
     order: transformOrderFromBackend(data.order),
     items: (data.items || []).map(transformOrderItemFromBackend),

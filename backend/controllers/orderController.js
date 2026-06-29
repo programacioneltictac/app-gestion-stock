@@ -239,6 +239,59 @@ const receiveAll = async (req, res) => {
   }
 };
 
+// PATCH /api/orders/:id/items/complete
+// Finaliza (o reabre) un conjunto de items de una orden como marca de GESTIÓN.
+// Independiente de la recepción de mercadería. Pensado para que varias personas
+// que gestionan la misma orden coordinen qué items ya fueron atendidos.
+//   Solo aplica a ordenes INTERNAS (Hub). Cualquier usuario con acceso a la
+//   sucursal (incluido employee) puede finalizar/reabrir, en cualquier estado no
+//   terminal.
+const completeItems = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { detail_ids, completed } = req.body;
+
+    if (!Array.isArray(detail_ids) || detail_ids.length === 0) {
+      return res.status(400).json({ status: "error", message: "Debe indicar al menos un ítem" });
+    }
+    if (typeof completed !== "boolean") {
+      return res.status(400).json({ status: "error", message: "completed debe ser booleano" });
+    }
+
+    const order = await Order.findById(id);
+    if (!order) {
+      return res.status(404).json({ status: "error", message: "Orden no encontrada" });
+    }
+    // Solo ordenes internas (Hub): blindaje server-side del alcance.
+    if (order.order_type !== "internal") {
+      return res.status(400).json({
+        status: "error",
+        message: "Finalizar ítems solo está disponible en órdenes de Nodo Hub",
+      });
+    }
+    if (!canAccessBranch(req.user, order.branch_id)) {
+      return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
+    }
+    if (ORDER_STATUSES_TERMINAL.includes(order.status)) {
+      return res.status(400).json({
+        status: "error",
+        message: "No se puede modificar una orden finalizada o cancelada",
+      });
+    }
+
+    const ids = detail_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    const affected = await Order.setItemsCompleted(id, ids, req.user.id, completed);
+
+    const items = await Order.findDetailsByOrderId(id);
+    console.log(
+      `Items ${completed ? "finalizados" : "reabiertos"} - Orden: ${id}, Items: ${affected}, Usuario: ${req.user.username}`
+    );
+    res.json({ status: "success", order, items });
+  } catch (error) {
+    handleControllerError(res, error, "Error finalizando items de orden:");
+  }
+};
+
 // DELETE /api/orders/:id
 // Elimina una orden y sus items (solo admin/manager)
 const deleteOrder = async (req, res) => {
@@ -307,6 +360,7 @@ module.exports = {
   updateStatus,
   updateItemReceived,
   receiveAll,
+  completeItems,
   deleteOrder,
   deleteDetail,
 };

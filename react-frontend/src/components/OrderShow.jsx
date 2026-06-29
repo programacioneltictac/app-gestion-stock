@@ -17,6 +17,8 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import UndoIcon from '@mui/icons-material/Undo';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import { useParams, useNavigate, useLocation } from 'react-router';
 import { useDialogs } from '../hooks/useDialogs/useDialogs';
@@ -27,6 +29,7 @@ import {
   updateOrderStatus,
   updateOrderItemReceived,
   receiveAllOrderItems,
+  completeOrderItems,
   deleteOrder,
   deleteOrderItem,
   getOrderStatusLabel,
@@ -79,6 +82,14 @@ export default function OrderShow() {
   const isEmployee = user?.role === 'employee';
   const canEditStatus = !isEmployee;
   const canDelete = !isEmployee;
+
+  // Las órdenes internas (Nodo Hub) usan "finalizar ítem" (marca de gestión) en
+  // lugar de la recepción de mercadería. Cualquiera con acceso puede finalizar.
+  const isInternal = order?.isInternal === true;
+
+  // Selección de filas (solo Hub) para finalizar/reabrir en lote.
+  const [rowSelection, setRowSelection] = React.useState([]);
+  const [isCompleting, setIsCompleting] = React.useState(false);
 
   const handleDelete = React.useCallback(async () => {
     if (!order) return;
@@ -235,6 +246,68 @@ export default function OrderShow() {
     setIsReceivingAll(false);
   }, [order, dialogs, notifications]);
 
+  // Finaliza o reabre los ítems seleccionados (solo órdenes Hub). El botón decide
+  // la acción según la selección: si TODOS los seleccionados ya están finalizados,
+  // reabre; en caso contrario, finaliza.
+  const selectedItems = React.useMemo(
+    () => items.filter((it) => rowSelection.includes(it.id)),
+    [items, rowSelection]
+  );
+  const allSelectedDone = selectedItems.length > 0 && selectedItems.every((it) => it.completedAt);
+
+  const handleCompleteSelected = React.useCallback(async (completed) => {
+    if (selectedItems.length === 0) return;
+    setIsCompleting(true);
+    try {
+      const { order: updatedOrder, items: updatedItems } = await completeOrderItems(
+        order.id,
+        selectedItems.map((it) => it.id),
+        completed
+      );
+      setOrder(updatedOrder);
+      setItems(updatedItems);
+      setRowSelection([]);
+      notifications.show(
+        completed ? 'Ítems finalizados' : 'Ítems reabiertos',
+        { severity: 'success', autoHideDuration: 3000 }
+      );
+    } catch (err) {
+      notifications.show(`Error: ${err.message}`, { severity: 'error', autoHideDuration: 4000 });
+    }
+    setIsCompleting(false);
+  }, [order, selectedItems, notifications]);
+
+  // ¿La orden está lista para cerrarse? Habilita el aviso para finalizarla a mano
+  // (no se auto-finaliza, para no perder reversibilidad). El criterio depende del
+  // tipo: internas (Hub) = todos los ítems FINALIZADOS; externas (proveedor) =
+  // todos los ítems RECIBIDOS completos.
+  const allItemsCompleted =
+    items.length > 0 &&
+    (isInternal
+      ? items.every((it) => it.completedAt)
+      : items.every((it) => it.quantityReceived >= it.quantityOrdered));
+
+  const handleFinalizeOrder = React.useCallback(async () => {
+    if (!order) return;
+    const confirmed = await dialogs.confirm(
+      `¿Finalizar la orden #${order.id}? Quedará cerrada y no se podrán reabrir ítems ni modificarla.`,
+      {
+        title: '¿Finalizar orden?',
+        severity: 'warning',
+        okText: 'Finalizar orden',
+        cancelText: 'Cancelar',
+      }
+    );
+    if (!confirmed) return;
+    try {
+      const updated = await updateOrderStatus(order.id, 'finalizado', statusNotes || null);
+      setOrder(updated);
+      notifications.show('Orden finalizada', { severity: 'success', autoHideDuration: 3000 });
+    } catch (err) {
+      notifications.show(`Error: ${err.message}`, { severity: 'error', autoHideDuration: 4000 });
+    }
+  }, [order, statusNotes, dialogs, notifications]);
+
   const handleDownloadExcel = React.useCallback(async () => {
     if (!order) return;
     try {
@@ -246,42 +319,53 @@ export default function OrderShow() {
 
   const columns = React.useMemo(
     () => [
-      {
-        field: 'done',
-        headerName: '',
-        width: 56,
-        sortable: false,
-        filterable: false,
-        disableColumnMenu: true,
-        align: 'center',
-        headerAlign: 'center',
-        renderCell: ({ row }) => {
-          const isDone = row.quantityReceived >= row.quantityOrdered;
-          return (
-            <Tooltip title={isDone ? 'Recibido completo — clic para desmarcar' : 'Marcar como recibido completo'} enterDelay={600}>
-              <span>
-                <Checkbox
-                  size="small"
-                  color="success"
-                  checked={isDone}
-                  disabled={!canReceive || isSavingItem}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={() => handleToggleReceived(row)}
-                />
-              </span>
-            </Tooltip>
-          );
-        },
-      },
+      // Columna de check de RECEPCIÓN: solo en órdenes a proveedor (externas). En
+      // las internas (Hub) la finalización se hace con selección + botón superior.
+      ...(!isInternal
+        ? [{
+            field: 'done',
+            headerName: '',
+            width: 56,
+            sortable: false,
+            filterable: false,
+            disableColumnMenu: true,
+            align: 'center',
+            headerAlign: 'center',
+            renderCell: ({ row }) => {
+              const isDone = row.quantityReceived >= row.quantityOrdered;
+              return (
+                <Tooltip title={isDone ? 'Recibido completo — clic para desmarcar' : 'Marcar como recibido completo'} enterDelay={600}>
+                  <span>
+                    <Checkbox
+                      size="small"
+                      color="success"
+                      checked={isDone}
+                      disabled={!canReceive || isSavingItem}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => handleToggleReceived(row)}
+                    />
+                  </span>
+                </Tooltip>
+              );
+            },
+          }]
+        : []),
       {
         field: 'displayName',
         headerName: 'Producto',
         flex: 1,
         minWidth: 220,
         renderCell: ({ row, value }) => {
-          const isDone = row.quantityReceived >= row.quantityOrdered;
-          return (
-            <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+          // En internas el "tachado/sombreado" lo da completedAt (finalización de
+          // gestión); en externas lo da la recepción completa.
+          const isDone = isInternal
+            ? !!row.completedAt
+            : row.quantityReceived >= row.quantityOrdered;
+          const completedTooltip = isInternal && row.completedAt
+            ? `Finalizado${row.completedByUsername ? ` por ${row.completedByUsername}` : ''} · ${new Date(row.completedAt).toLocaleString('es-AR')}`
+            : '';
+          const content = (
+            <Box sx={{ display: 'flex', alignItems: 'center', height: '100%', width: '100%' }}>
               <Typography
                 variant="body2"
                 sx={{ textDecoration: isDone ? 'line-through' : 'none' }}
@@ -291,6 +375,10 @@ export default function OrderShow() {
               </Typography>
             </Box>
           );
+          // El tooltip cubre toda la celda Producto (ancho flexible de la fila).
+          return completedTooltip
+            ? <Tooltip title={completedTooltip} enterDelay={400} followCursor>{content}</Tooltip>
+            : content;
         },
       },
       // Sucursal del ítem: en órdenes externas consolidadas es la info que
@@ -327,7 +415,10 @@ export default function OrderShow() {
         width: 90,
         type: 'number',
       },
-      {
+      // Columna "Recibido": solo en órdenes a proveedor (recepción de mercadería).
+      // En el Hub no se gestiona recepción; el avance se marca con "finalizar".
+      ...(!isInternal
+        ? [{
         field: 'quantityReceived',
         headerName: 'Recibido',
         width: 120,
@@ -373,7 +464,8 @@ export default function OrderShow() {
             </Box>
           );
         },
-      },
+      }]
+        : []),
       {
         field: 'unitCost',
         headerName: 'Costo unit.',
@@ -435,7 +527,7 @@ export default function OrderShow() {
           }]
         : []),
     ],
-    [editingItemId, editingQty, isSavingItem, isOrderEditable, canReceive, canDelete, handleEditItem, handleSaveItemReceived, handleToggleReceived, handleDeleteItem]
+    [editingItemId, editingQty, isSavingItem, isOrderEditable, canReceive, canDelete, isInternal, handleEditItem, handleSaveItemReceived, handleToggleReceived, handleDeleteItem]
   );
 
   if (isLoading) {
@@ -477,7 +569,7 @@ export default function OrderShow() {
           >
             Descargar
           </ActionButton>
-          {canReceive && hasPendingItems && (
+          {!isInternal && canReceive && hasPendingItems && (
             <ActionButton
               color="success"
               icon={<DoneAllIcon />}
@@ -485,6 +577,18 @@ export default function OrderShow() {
               onClick={handleReceiveAll}
             >
               Marcar todo recibido
+            </ActionButton>
+          )}
+          {isInternal && isOrderEditable && rowSelection.length > 0 && (
+            <ActionButton
+              color="success"
+              icon={allSelectedDone ? <UndoIcon /> : <CheckCircleIcon />}
+              loading={isCompleting}
+              onClick={() => handleCompleteSelected(!allSelectedDone)}
+            >
+              {allSelectedDone
+                ? `Reabrir seleccionados (${rowSelection.length})`
+                : `Finalizar seleccionados (${rowSelection.length})`}
             </ActionButton>
           )}
           {canDelete && (
@@ -576,18 +680,45 @@ export default function OrderShow() {
         </Stack>
       )}
 
+      {/* Aviso: todos los ítems listos → ofrecer cerrar la orden. No se
+          auto-finaliza para conservar la reversibilidad. El criterio depende del
+          tipo: Hub = finalizados; proveedor = recibidos completos. */}
+      {allItemsCompleted && isOrderEditable && (
+        <Alert
+          severity="success"
+          sx={{ mb: 3 }}
+          action={
+            <Button color="inherit" size="small" startIcon={<CheckCircleIcon />} onClick={handleFinalizeOrder}>
+              Finalizar orden
+            </Button>
+          }
+        >
+          {isInternal
+            ? 'Todos los ítems están finalizados. Podés cerrar la orden.'
+            : 'Todos los ítems están recibidos. Podés cerrar la orden.'}
+        </Alert>
+      )}
+
       {/* Tabla de items */}
       <Box sx={{ flex: 1, width: '100%' }}>
         <DataGrid
           rows={items}
           columns={columns}
-          disableRowSelectionOnClick
+          // En órdenes Hub: selección múltiple (clic en fila = seleccionar, no
+          // confirma) para finalizar/reabrir en lote. En externas: sin selección.
+          checkboxSelection={isInternal}
+          disableRowSelectionOnClick={!isInternal}
+          rowSelectionModel={isInternal ? rowSelection : undefined}
+          onRowSelectionModelChange={isInternal ? setRowSelection : undefined}
           autoHeight
           pageSizeOptions={[25, 50, 100]}
           initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
-          getRowClassName={(params) =>
-            params.row.quantityReceived >= params.row.quantityOrdered ? 'row--received' : ''
-          }
+          getRowClassName={(params) => {
+            const done = isInternal
+              ? !!params.row.completedAt
+              : params.row.quantityReceived >= params.row.quantityOrdered;
+            return done ? 'row--received' : '';
+          }}
           sx={{
             ...dataGridSx,
             '& .row--received': { opacity: 0.55 },

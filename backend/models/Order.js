@@ -474,6 +474,11 @@ class Order {
          cond.condition_name,
          sc.branch_id       AS item_branch_id,
          scb.name           AS item_branch_name,
+         -- Finalización de gestión (solo se usa en órdenes internas/Hub): quién y
+         -- cuándo marcó el ítem como completado. NULL = no finalizado.
+         od.completed_at,
+         od.completed_by,
+         cu.username        AS completed_by_username,
          od.updated_at
        FROM order_details od
        LEFT JOIN product_stock_by_branch psb ON od.product_stock_id = psb.id
@@ -484,6 +489,7 @@ class Order {
        LEFT JOIN stock_controls sc ON od.stock_control_id = sc.id
        LEFT JOIN branches      scb ON sc.branch_id = scb.id
        LEFT JOIN conditions    cond ON sc.condition_id = cond.id
+       LEFT JOIN users         cu  ON od.completed_by = cu.id
        WHERE od.order_control_id = $1
        ORDER BY od.display_name`,
       [orderId]
@@ -558,6 +564,37 @@ class Order {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Marca (o reabre) como FINALIZADOS un conjunto de items de una orden. Es una
+   * marca de gestión independiente de la recepción: permite que varias personas
+   * que gestionan la misma orden coordinen qué items ya fueron atendidos. Solo se
+   * usa en ordenes internas (Hub); el controller blinda ese alcance.
+   *
+   * Acota el UPDATE a los detailIds que REALMENTE pertenecen a la orden (defensa
+   * contra ids de otra orden). Al finalizar, sella completed_at=NOW() y
+   * completed_by=userId; al reabrir, ambos a NULL.
+   *
+   * @param {number}   orderId
+   * @param {number[]} detailIds
+   * @param {number}   userId     usuario que finaliza (ignorado al reabrir).
+   * @param {boolean}  completed  true = finalizar, false = reabrir.
+   * @returns {number} cantidad de items afectados.
+   */
+  static async setItemsCompleted(orderId, detailIds, userId, completed) {
+    if (!Array.isArray(detailIds) || detailIds.length === 0) return 0;
+
+    const result = await pool.query(
+      `UPDATE order_details
+       SET completed_at = CASE WHEN $4 THEN NOW() ELSE NULL::timestamp END,
+           completed_by = CASE WHEN $4 THEN $3::int ELSE NULL::int END,
+           updated_at   = NOW()
+       WHERE order_control_id = $1
+         AND id = ANY($2::int[])`,
+      [orderId, detailIds, userId, completed]
+    );
+    return result.rowCount;
   }
 
   /**

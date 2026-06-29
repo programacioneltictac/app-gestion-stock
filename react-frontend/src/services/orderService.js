@@ -32,6 +32,15 @@ class OrderService {
     return apiClient.patch(`/orders/${orderId}/receive-all`);
   }
 
+  // Finaliza (completed=true) o reabre (false) un conjunto de items de una orden.
+  // Solo aplica a ordenes internas (Hub).
+  async completeItems(orderId, detailIds, completed) {
+    return apiClient.patch(`/orders/${orderId}/items/complete`, {
+      detail_ids: detailIds,
+      completed,
+    });
+  }
+
   async deleteOrder(orderId) {
     return apiClient.delete(`/orders/${orderId}`);
   }
