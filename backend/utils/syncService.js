@@ -466,6 +466,45 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
       [branch.id, orderPct, overstockPct],
     );
 
+    // Liberar items YA FINALIZADOS: con el stock recien actualizado, un item
+    // cuyo pedido ya "ingreso" debe volver a estar disponible para reiniciar el
+    // ciclo (desaparece el chip "Pedido a...", vuelve a ser pedible). Se libera
+    // (ordered_at/order_detail_id = NULL) el stock_control de esta sucursal que:
+    //   - tiene al menos una linea en una orden VIVA (no cancelada), y
+    //   - TODAS sus lineas vivas estan finalizadas: completed_at IS NOT NULL
+    //     (finalizacion por item, Hub) O la orden esta en estado 'finalizado'
+    //     (proveedor, que no tiene finalizacion por item).
+    // Correr DESPUES del update de stock garantiza que el stock_current ya es el
+    // real: si el pedido efectivamente entro, el item quedara en optimo y no se
+    // repedira (sin ventana de doble pedido).
+    await client.query(
+      `UPDATE stock_controls sc
+       SET ordered_at      = NULL,
+           order_detail_id = NULL,
+           updated_at      = NOW()
+       FROM monthly_controls mc
+       WHERE sc.monthly_control_id = mc.id
+         AND mc.branch_id = $1
+         AND mc.status IN ('draft', 'completed')
+         AND sc.ordered_at IS NOT NULL
+         -- al menos una linea en orden viva
+         AND EXISTS (
+           SELECT 1 FROM order_details od
+           JOIN orders_controls oc ON od.order_control_id = oc.id
+           WHERE od.stock_control_id = sc.id AND oc.status <> 'cancelado'
+         )
+         -- ninguna linea viva SIN finalizar (todas finalizadas)
+         AND NOT EXISTS (
+           SELECT 1 FROM order_details od
+           JOIN orders_controls oc ON od.order_control_id = oc.id
+           WHERE od.stock_control_id = sc.id
+             AND oc.status <> 'cancelado'
+             AND od.completed_at IS NULL
+             AND oc.status <> 'finalizado'
+         )`,
+      [branch.id],
+    );
+
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");

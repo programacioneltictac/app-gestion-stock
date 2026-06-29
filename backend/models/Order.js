@@ -416,19 +416,65 @@ class Order {
 
   /**
    * Actualiza el estado de una orden.
-   * Estados validos: pending, sent, partial, completed, cancelled
+   *
+   * Si la orden pasa a 'cancelado', LIBERA sus items en el control: pone
+   * ordered_at/order_detail_id en NULL para cada stock_control ligado que NO
+   * quede en ninguna otra orden viva (no cancelada). Asi desaparece el chip
+   * "Pedido a..." y el item vuelve a ser pedible/editable (una orden cancelada
+   * es como si nunca se hubiera pedido). Mismo criterio que deleteDetail, pero
+   * sin borrar las lineas (la orden cancelada se conserva como historico).
    */
   static async updateStatus(id, status, notes = null) {
-    const result = await pool.query(
-      `UPDATE orders_controls
-       SET status = $1,
-           notes  = COALESCE($2, notes),
-           updated_at = NOW()
-       WHERE id = $3
-       RETURNING *`,
-      [status, notes, id]
-    );
-    return result.rows[0] || null;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const result = await client.query(
+        `UPDATE orders_controls
+         SET status = $1,
+             notes  = COALESCE($2, notes),
+             updated_at = NOW()
+         WHERE id = $3
+         RETURNING *`,
+        [status, notes, id]
+      );
+      const order = result.rows[0] || null;
+
+      if (order && status === "cancelado") {
+        // Controles ligados a ESTA orden. Se liberan los que ya no tengan
+        // ninguna linea en una orden viva (no cancelada). El propio cancelado de
+        // esta orden ya cuenta como "no viva", asi que su sola presencia no
+        // bloquea la liberacion.
+        await client.query(
+          `UPDATE stock_controls sc
+           SET ordered_at      = NULL,
+               order_detail_id = NULL,
+               updated_at      = NOW()
+           WHERE sc.id IN (
+             SELECT DISTINCT od.stock_control_id
+             FROM order_details od
+             WHERE od.order_control_id = $1
+               AND od.stock_control_id IS NOT NULL
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM order_details od2
+             JOIN orders_controls oc2 ON od2.order_control_id = oc2.id
+             WHERE od2.stock_control_id = sc.id
+               AND oc2.status <> 'cancelado'
+           )`,
+          [id]
+        );
+      }
+
+      await client.query("COMMIT");
+      return order;
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   /**
