@@ -18,6 +18,9 @@ router.put("/monthly-control/complete", stockController.completeMonthlyControl);
 // PUT /api/stock/monthly-control/discontinue — discontinúa un control completado.
 router.put("/monthly-control/discontinue", stockController.discontinueMonthlyControl);
 
+// PUT /api/stock/monthly-control/reopen — reabre un control completado a draft (admin).
+router.put("/monthly-control/reopen", stockController.reopenMonthlyControl);
+
 // GET /api/stock/monthly-control/history
 router.get("/monthly-control/history", stockController.getMonthlyControlHistory);
 

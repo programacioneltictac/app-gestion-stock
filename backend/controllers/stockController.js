@@ -182,6 +182,37 @@ const discontinueMonthlyControl = async (req, res) => {
   }
 };
 
+// PUT /api/stock/monthly-control/reopen
+// Reabre un control COMPLETADO devolviéndolo a 'draft' para ajustes operativos
+// (excepción de admin). Habilita el form de agregar/editar/eliminar ítems. Se
+// vuelve a cerrar con el flujo normal "Completar".
+const reopenMonthlyControl = async (req, res) => {
+  try {
+    const { control_id } = req.body;
+    if (!control_id) {
+      return res.status(400).json({ status: "error", message: "control_id es requerido" });
+    }
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ status: "error", message: "Solo los administradores pueden reabrir controles" });
+    }
+
+    const control = await MonthlyControl.findById(control_id);
+    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
+    if (!canAccessBranch(req.user, control.branch_id)) {
+      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
+    }
+    if (control.status !== "completed") {
+      return res.status(400).json({ status: "error", message: "Solo se pueden reabrir controles completados" });
+    }
+
+    const updatedControl = await MonthlyControl.reopen(control_id);
+    console.log(`Control reabierto - ID: ${control_id}, Usuario: ${req.user.username}`);
+    res.json({ status: "success", message: "Control reabierto para edición", control: updatedControl });
+  } catch (error) {
+    handleControllerError(res, error, "Error reabriendo control:");
+  }
+};
+
 // GET /api/stock/monthly-control/:control_id/open-orders-count
 // Cantidad de órdenes abiertas vinculadas al control. Lo usa el front para
 // avisar antes de discontinuar.
@@ -320,6 +351,15 @@ const deleteStockItem = async (req, res) => {
     if (item.control_status !== "draft") {
       return res.status(400).json({ status: "error", message: "Solo se pueden eliminar ítems de controles en borrador" });
     }
+    // Protección al reabrir un control: un ítem que ya generó una orden no se
+    // puede eliminar (rompería la relación control↔orden). Se debe quitar desde
+    // la orden si corresponde.
+    if (item.ordered_at) {
+      return res.status(400).json({
+        status: "error",
+        message: "Este ítem ya generó una orden y no se puede eliminar. Quitalo desde la orden si corresponde.",
+      });
+    }
 
     await StockControl.delete(item_id);
     console.log(`Ítem eliminado - ID: ${item_id}, Usuario: ${req.user.username}`);
@@ -453,6 +493,7 @@ module.exports = {
   getDiscontinued,
   completeMonthlyControl,
   discontinueMonthlyControl,
+  reopenMonthlyControl,
   getOpenOrdersCount,
   getMonthlyControlHistory,
   deleteMonthlyControl,

@@ -27,6 +27,10 @@ class StockService {
     return apiClient.put('/stock/monthly-control/discontinue', { control_id: controlId });
   }
 
+  async reopenControl(controlId) {
+    return apiClient.put('/stock/monthly-control/reopen', { control_id: controlId });
+  }
+
   async getOpenOrdersCount(controlId) {
     return apiClient.get(`/stock/monthly-control/${controlId}/open-orders-count`);
   }

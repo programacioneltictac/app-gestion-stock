@@ -97,6 +97,13 @@ export async function completeMonthlyControl(controlId) {
   return transformControlFromBackend(data.control);
 }
 
+// Reabre un control completado a 'draft' para edición (admin). Devuelve el
+// control transformado (ya en draft).
+export async function reopenMonthlyControl(controlId) {
+  const data = await stockService.reopenControl(controlId);
+  return transformControlFromBackend(data.control);
+}
+
 // Discontinúa un control completado. Devuelve el control transformado y la
 // cantidad de órdenes abiertas que tenía vinculadas (informativo).
 export async function discontinueMonthlyControl(controlId) {

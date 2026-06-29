@@ -81,6 +81,22 @@ class MonthlyControl {
     return result.rows[0];
   }
 
+  // Reabre un control COMPLETADO devolviéndolo a 'draft' para ajustes operativos
+  // (agregar/editar/eliminar ítems). Excepción de admin: el flujo normal es
+  // inmutable tras completar. El sync ya recalcula draft+completed por igual, así
+  // que reabrir no altera el stock; solo habilita la edición. Se vuelve a cerrar
+  // con el flujo normal "Completar".
+  static async reopen(id) {
+    const result = await pool.query(
+      `UPDATE monthly_controls
+       SET status = 'draft', updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+    return result.rows[0];
+  }
+
   // Discontinúa un control completado: queda de archivo. El sync deja de
   // actualizar su stock y no se pueden generar órdenes desde él. Es terminal.
   static async discontinue(id) {

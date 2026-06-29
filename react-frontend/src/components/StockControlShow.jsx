@@ -20,16 +20,19 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import ArchiveIcon from "@mui/icons-material/Archive";
+import LockOpenIcon from "@mui/icons-material/LockOpen";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
 import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useDialogs } from "../hooks/useDialogs/useDialogs";
 import useNotifications from "../hooks/useNotifications/useNotifications";
+import { useAuth } from "../context/AuthContext";
 import {
   getStockItems,
   upsertStockItem,
   deleteStockItem,
   completeMonthlyControl,
   discontinueMonthlyControl,
+  reopenMonthlyControl,
   getOpenOrdersCount,
   getAvailableProducts,
   getConditions,
@@ -85,6 +88,8 @@ export default function StockControlShow() {
   const navigate = useNavigate();
   const dialogs = useDialogs();
   const notifications = useNotifications();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
 
   const [control, setControl] = React.useState(null);
   const [items, setItems] = React.useState([]);
@@ -389,6 +394,34 @@ export default function StockControlShow() {
     }
   }, [controlId, dialogs, notifications, loadData]);
 
+  // Reabre un control completado a borrador para ajustes operativos (solo admin).
+  // Reusa el form de edición de siempre; se vuelve a cerrar con "Completar".
+  const handleReopenControl = React.useCallback(async () => {
+    const confirmed = await dialogs.confirm(
+      "Se reabrirá el control para edición (volverá a borrador). Podrás agregar, editar o quitar ítems y luego completarlo de nuevo. Los ítems que ya generaron una orden no se pueden eliminar.",
+      {
+        title: "¿Reabrir control para editar?",
+        severity: "warning",
+        okText: "Reabrir",
+        cancelText: "Cancelar",
+      }
+    );
+    if (!confirmed) return;
+    try {
+      await reopenMonthlyControl(Number(controlId));
+      notifications.show("Control reabierto para edición", {
+        severity: "success",
+        autoHideDuration: 3000,
+      });
+      loadData();
+    } catch (err) {
+      notifications.show(`Error al reabrir: ${err.message}`, {
+        severity: "error",
+        autoHideDuration: 3000,
+      });
+    }
+  }, [controlId, dialogs, notifications, loadData]);
+
   const columns = React.useMemo(
     () => [
       { field: "displayName", headerName: "Producto", flex: 1, minWidth: 200 },
@@ -582,6 +615,15 @@ export default function StockControlShow() {
               onClick={handleCompleteControl}
             >
               Completar
+            </ActionButton>
+          )}
+          {control?.status === "completed" && isAdmin && (
+            <ActionButton
+              variant="secondary"
+              icon={<LockOpenIcon />}
+              onClick={handleReopenControl}
+            >
+              Reabrir para editar
             </ActionButton>
           )}
           {control?.status === "completed" && (
