@@ -134,6 +134,17 @@ class Alert {
            SELECT 1 FROM stock_controls sc
            WHERE sc.monthly_control_id = mc.id AND sc.product_stock_id = psb.id
          )
+         -- Excluir marcas con una prueba EN PRUEBA en esta sucursal/rubro: se
+         -- gestionan aparte (Marcas a prueba), NO son discontinuo todavía. Mismo
+         -- criterio que StockControl.findDiscontinued, para que el valor del
+         -- dashboard coincida con el del listado del control.
+         AND NOT EXISTS (
+           SELECT 1 FROM brand_trials bt
+           WHERE bt.status = 'en_prueba'
+             AND bt.branch_id = psb.branch_id
+             AND bt.brand_id = COALESCE(pg.brand_id, p.brand_id)
+             AND (bt.category_id IS NULL OR bt.category_id = mc.category_id)
+         )
          ${branchClause}
        GROUP BY mc.id, mc.branch_id, b.name, c.category_name
        HAVING SUM(psb.stock * ${COST_EXPR}) > 0
