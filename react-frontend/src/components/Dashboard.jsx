@@ -16,6 +16,8 @@ import Typography from '@mui/material/Typography';
 import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+import StorefrontIcon from '@mui/icons-material/Storefront';
+import HubIcon from '@mui/icons-material/Hub';
 import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import SpeedIcon from '@mui/icons-material/Speed';
@@ -43,22 +45,10 @@ function SummaryCard({ icon, label, value, color, onClick }) {
     </CardContent>
   );
   return (
-    <Card
-      variant="outlined"
-      sx={{
-        // 4 tarjetas por fila en desktop, 2 en tablet, 1 en móvil. El gap del
-        // Stack es 16px (spacing=2); para 4 columnas se descuentan 12px por celda.
-        flexGrow: 1,
-        flexShrink: 1,
-        flexBasis: {
-          xs: '100%',
-          sm: 'calc(50% - 8px)',
-          md: 'calc(25% - 12px)',
-        },
-        minWidth: 200,
-      }}
-    >
-      {onClick ? <CardActionArea onClick={onClick}>{content}</CardActionArea> : content}
+    // El ancho lo define el grid contenedor (repeat(N, 1fr)); la card ocupa toda
+    // su celda. height:100% para que las filas queden parejas con labels largos.
+    <Card variant="outlined" sx={{ width: '100%', height: '100%' }}>
+      {onClick ? <CardActionArea onClick={onClick} sx={{ height: '100%' }}>{content}</CardActionArea> : content}
     </Card>
   );
 }
@@ -136,8 +126,21 @@ export default function Dashboard() {
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error.message}</Alert>}
 
-      {/* Tarjetas resumen */}
-      <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mb: 3 }}>
+      {/* Tarjetas resumen — grid responsive: 5 col en desktop (2 filas de 5),
+          que se reduce en pantallas chicas. Las tarjetas se rellenan según el rol. */}
+      <Box
+        sx={{
+          mb: 3,
+          display: 'grid',
+          gap: 2,
+          gridTemplateColumns: {
+            xs: 'repeat(1, 1fr)',
+            sm: 'repeat(2, 1fr)',
+            md: 'repeat(3, 1fr)',
+            lg: 'repeat(5, 1fr)',
+          },
+        }}
+      >
         <SummaryCard
           icon={<PriorityHighIcon fontSize="large" />}
           label="Faltantes MUY PRIORITARIOS"
@@ -151,11 +154,18 @@ export default function Dashboard() {
           color="warning"
         />
         <SummaryCard
-          icon={<ShoppingCartIcon fontSize="large" />}
-          label="Órdenes pendientes"
-          value={data?.pendingOrders ?? 0}
+          icon={<StorefrontIcon fontSize="large" />}
+          label="Órdenes pendientes (proveedor)"
+          value={data?.pendingOrdersSupplier ?? 0}
           color="info"
-          onClick={() => navigate('/orders?status=pending')}
+          onClick={() => navigate('/orders?tab=external&status=pending')}
+        />
+        <SummaryCard
+          icon={<HubIcon fontSize="large" />}
+          label="Órdenes pendientes (Nodo Hub)"
+          value={data?.pendingOrdersHub ?? 0}
+          color="info"
+          onClick={() => navigate('/orders?tab=internal&status=pending')}
         />
         <SummaryCard
           icon={<AssignmentTurnedInIcon fontSize="large" />}
@@ -177,13 +187,23 @@ export default function Dashboard() {
         />
         <SummaryCard
           icon={<HourglassBottomIcon fontSize="large" />}
-          label="Antigüedad prom. órdenes en gestión"
+          label="Antigüedad prom. órdenes (proveedor)"
           value={
-            data?.openOrdersTotal
-              ? `${data.avgOrderAgeDays} ${data.avgOrderAgeDays === 1 ? 'día' : 'días'}`
+            data?.openOrdersSupplier
+              ? `${data.avgOrderAgeSupplierDays} ${data.avgOrderAgeSupplierDays === 1 ? 'día' : 'días'}`
               : '—'
           }
-          color={data?.avgOrderAgeDays != null && data.avgOrderAgeDays >= 7 ? 'warning' : 'info'}
+          color={data?.avgOrderAgeSupplierDays != null && data.avgOrderAgeSupplierDays >= 7 ? 'warning' : 'info'}
+        />
+        <SummaryCard
+          icon={<HourglassBottomIcon fontSize="large" />}
+          label="Antigüedad prom. órdenes (Nodo Hub)"
+          value={
+            data?.openOrdersHub
+              ? `${data.avgOrderAgeHubDays} ${data.avgOrderAgeHubDays === 1 ? 'día' : 'días'}`
+              : '—'
+          }
+          color={data?.avgOrderAgeHubDays != null && data.avgOrderAgeHubDays >= 7 ? 'warning' : 'info'}
         />
         {(user?.role === 'admin' || user?.role === 'manager') && (
           <SummaryCard
@@ -200,7 +220,7 @@ export default function Dashboard() {
           value={formatCurrency(totals.discTotal)}
           color="secondary"
         />
-      </Stack>
+      </Box>
 
       {/* Listas accionables */}
       <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap alignItems="flex-start">

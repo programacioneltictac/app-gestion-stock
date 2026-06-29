@@ -74,10 +74,14 @@ class Alert {
       params
     );
 
-    // 3) Órdenes pendientes (status = 'pending'). Para employee, de su sucursal.
+    // 3) Órdenes pendientes (status = 'pending'), separadas por tipo:
+    //    external = a proveedor, internal = a Nodo Hub. Para employee, de su sucursal.
     const ordersBranchClause = branchId ? "AND oc.branch_id = $1" : "";
     const pendingOrders = await pool.query(
-      `SELECT COUNT(*) AS total
+      `SELECT
+         COUNT(*)                                              AS total,
+         COUNT(*) FILTER (WHERE oc.order_type = 'external')    AS supplier,
+         COUNT(*) FILTER (WHERE oc.order_type = 'internal')    AS hub
        FROM orders_controls oc
        WHERE oc.status = 'pending' ${ordersBranchClause}`,
       params
@@ -93,11 +97,15 @@ class Alert {
     );
 
     // 3c) Antigüedad promedio (en días) de las órdenes EN GESTIÓN (no finalizadas
-    //     ni canceladas). Al cerrarse/cancelarse una orden deja de contar. Se
-    //     mide hoy - created_at sobre las abiertas.
+    //     ni canceladas), separada por tipo (proveedor/Hub). Al cerrarse/cancelarse
+    //     una orden deja de contar. Se mide hoy - created_at sobre las abiertas.
+    const ageExpr = "EXTRACT(EPOCH FROM (NOW() - oc.created_at)) / 86400";
     const avgOrderAge = await pool.query(
-      `SELECT ROUND(AVG(EXTRACT(EPOCH FROM (NOW() - oc.created_at)) / 86400))::int AS avg_days,
-              COUNT(*) AS open_total
+      `SELECT
+         ROUND(AVG(${ageExpr}) FILTER (WHERE oc.order_type = 'external'))::int AS avg_days_supplier,
+         ROUND(AVG(${ageExpr}) FILTER (WHERE oc.order_type = 'internal'))::int AS avg_days_hub,
+         COUNT(*) FILTER (WHERE oc.order_type = 'external')                     AS open_supplier,
+         COUNT(*) FILTER (WHERE oc.order_type = 'internal')                     AS open_hub
        FROM orders_controls oc
        WHERE oc.status NOT IN ('finalizado', 'cancelado') ${ordersBranchClause}`,
       params
@@ -152,13 +160,20 @@ class Alert {
     // 6) Marcas a prueba vencidas sin decidir (pendientes de evaluación).
     const brandTrialsDue = await BrandTrial.countDue(branchId);
 
+    const age = avgOrderAge.rows[0] || {};
     return {
       muyPrioritarios: muyPrioritarios.rows,
       criticalBranches: criticalBranches.rows,
+      // Órdenes pendientes: total (compat) + desglose por tipo.
       pendingOrders: Number(pendingOrders.rows[0]?.total || 0),
+      pendingOrdersSupplier: Number(pendingOrders.rows[0]?.supplier || 0),
+      pendingOrdersHub: Number(pendingOrders.rows[0]?.hub || 0),
       authorizedOrders: Number(authorizedOrders.rows[0]?.total || 0),
-      avgOrderAgeDays: avgOrderAge.rows[0]?.avg_days != null ? Number(avgOrderAge.rows[0].avg_days) : null,
-      openOrdersTotal: Number(avgOrderAge.rows[0]?.open_total || 0),
+      // Antigüedad promedio por tipo (null si no hay órdenes abiertas de ese tipo).
+      avgOrderAgeSupplierDays: age.avg_days_supplier != null ? Number(age.avg_days_supplier) : null,
+      avgOrderAgeHubDays: age.avg_days_hub != null ? Number(age.avg_days_hub) : null,
+      openOrdersSupplier: Number(age.open_supplier || 0),
+      openOrdersHub: Number(age.open_hub || 0),
       avgCompliance: avgCompliance.rows[0]?.avg_compliance != null ? Number(avgCompliance.rows[0].avg_compliance) : null,
       brandTrialsDue,
       discontinuedValue: discontinuedValue.rows,
