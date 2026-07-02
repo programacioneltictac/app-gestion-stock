@@ -239,7 +239,7 @@ export default function Dashboard() {
                 {data.muyPrioritarios.map((r) => (
                   <ListItemButton
                     key={`mp-${r.controlId}`}
-                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}`)}
+                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?filter=needorder`)}
                   >
                     <ListItemText primary={`${r.branchName} — ${r.categoryName}`} />
                     <Chip label={r.faltantes} color="error" size="small" />

@@ -36,6 +36,7 @@ import {
   getOrderStatusColor,
   getOrderElapsedDays,
   formatElapsedDays,
+  getOrderProgress,
   ORDER_STATUSES_EDITABLE,
   ORDER_STATUSES_RECEIVING,
   ORDER_STATUS_OPTIONS,
@@ -286,6 +287,15 @@ export default function OrderShow() {
     (isInternal
       ? items.every((it) => it.completedAt)
       : items.every((it) => it.quantityReceived >= it.quantityOrdered));
+
+  // Indicador derivado "En proceso (X/Y)" para la cabecera (solo Hub). Se calcula
+  // desde los ítems ya cargados (más preciso que la vista de resumen). Reusa la
+  // misma regla que el listado (getOrderProgress) armando un objeto compatible.
+  const progress = React.useMemo(() => {
+    if (!order) return null;
+    const completedItems = items.filter((it) => it.completedAt).length;
+    return getOrderProgress({ ...order, totalItems: items.length, completedItems });
+  }, [order, items]);
 
   const handleFinalizeOrder = React.useCallback(async () => {
     if (!order) return;
@@ -608,6 +618,13 @@ export default function OrderShow() {
           label={getOrderStatusLabel(order.status)}
           color={getOrderStatusColor(order.status)}
         />
+        {progress && (
+          <Chip
+            variant="outlined"
+            color={progress.color}
+            label={progress.label}
+          />
+        )}
         <Chip
           variant="outlined"
           color={order.isInternal ? 'secondary' : 'default'}

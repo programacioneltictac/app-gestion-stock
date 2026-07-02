@@ -17,7 +17,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { useDialogs } from '../hooks/useDialogs/useDialogs';
 import useNotifications from '../hooks/useNotifications/useNotifications';
 import { useAuth } from '../context/AuthContext';
-import { getOrders, deleteOrder, getOrderStatusLabel, getOrderStatusColor, getOrderElapsedDays, formatElapsedDays, ORDER_STATUSES } from '../data/orders';
+import { getOrders, deleteOrder, getOrderStatusLabel, getOrderStatusColor, getOrderElapsedDays, formatElapsedDays, getOrderProgress, ORDER_STATUSES } from '../data/orders';
 import { getBranchesList } from '../data/branches';
 import PageContainer from './PageContainer';
 import ActionButton from './ActionButton';
@@ -191,14 +191,29 @@ export default function OrderList() {
       {
         field: 'status',
         headerName: 'Estado',
-        width: 150,
-        renderCell: ({ value }) => (
-          <Chip
-            label={getOrderStatusLabel(value)}
-            color={getOrderStatusColor(value)}
-            size="small"
-          />
-        ),
+        width: 200,
+        renderCell: ({ value, row }) => {
+          // Indicador derivado "En proceso (X/Y)" para órdenes Hub con ítems ya
+          // finalizados (no aplica en externas ni sin avance parcial).
+          const progress = getOrderProgress(row);
+          return (
+            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ height: '100%' }} useFlexGap flexWrap="wrap">
+              <Chip
+                label={getOrderStatusLabel(value)}
+                color={getOrderStatusColor(value)}
+                size="small"
+              />
+              {progress && (
+                <Chip
+                  label={progress.label}
+                  color={progress.color}
+                  size="small"
+                  variant="outlined"
+                />
+              )}
+            </Stack>
+          );
+        },
       },
       {
         field: 'createdAt',

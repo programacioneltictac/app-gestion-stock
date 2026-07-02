@@ -50,6 +50,28 @@ export function formatElapsedDays(days) {
   return `${days} ${days === 1 ? 'día' : 'días'}`;
 }
 
+// Indicador DERIVADO de progreso para órdenes internas (Nodo Hub). NO es un
+// estado real: se calcula de completedItems/totalItems (marca de gestión Fase
+// 11). Devuelve null cuando no aplica (orden externa, terminal, sin ítems, o sin
+// avance parcial). Estados posibles del badge:
+//   'partial'  → hay algunos ítems finalizados pero no todos ("En proceso X/Y")
+//   'done'     → todos los ítems finalizados pero la orden aún no se cerró
+// Una orden con 0 finalizados no muestra badge (su estado de cabecera ya lo dice).
+export function getOrderProgress(order) {
+  if (!order?.isInternal) return null;
+  if (ORDER_STATUSES_TERMINAL.includes(order.status)) return null;
+  const total = Number(order.totalItems || 0);
+  const done = Number(order.completedItems || 0);
+  if (total === 0 || done === 0) return null;
+  return {
+    kind: done >= total ? 'done' : 'partial',
+    done,
+    total,
+    label: done >= total ? `Listo (${done}/${total})` : `En proceso (${done}/${total})`,
+    color: done >= total ? 'success' : 'info',
+  };
+}
+
 export function getOrderStatusColor(status) {
   switch (status) {
     case 'pending':          return 'warning';
@@ -86,6 +108,9 @@ function transformOrderFromBackend(order) {
     supplierId:       order.supplier_id || null,
     supplierName:     order.supplier_name || '',
     totalItems:       Number(order.total_items || 0),
+    // Ítems ya finalizados (marca de gestión Fase 11). Solo relevante en órdenes
+    // internas/Hub; habilita el indicador derivado "En proceso (X/Y)".
+    completedItems:   Number(order.completed_items || 0),
     totalUnitsOrdered:  Number(order.total_units_ordered || 0),
     totalUnitsReceived: Number(order.total_units_received || 0),
     totalCostEstimate:  Number(order.total_cost_estimate || order.cost_estimate || 0),

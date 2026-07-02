@@ -118,6 +118,14 @@ export default function StockControlShow() {
   const [activeTab, setActiveTab] = React.useState(
     searchParams.get("tab") === "discontinued" ? "discontinued" : "control"
   );
+
+  // Filtro "solo Generar Pedido": se activa al entrar desde el dashboard
+  // (tarjeta/lista "Faltantes MUY PRIORITARIOS" → ?filter=needorder). Muestra en
+  // la tabla del control solo los ítems en estado generar_pedido (status 1). Es
+  // quitable con un chip para volver a ver todo el control.
+  const [needOrderOnly, setNeedOrderOnly] = React.useState(
+    searchParams.get("filter") === "needorder"
+  );
   const [discontinued, setDiscontinued] = React.useState([]);
   const [discLoaded, setDiscLoaded] = React.useState(false);
   const [isLoadingDisc, setIsLoadingDisc] = React.useState(false);
@@ -570,6 +578,15 @@ export default function StockControlShow() {
     []
   );
 
+  // Filas visibles en la tabla del control. Con el filtro "solo Generar Pedido"
+  // activo, se muestran únicamente los ítems en estado generar_pedido (1). La
+  // selección para órdenes sigue basada en `items` completo (isOrderable), así
+  // que el filtro es solo de visualización.
+  const visibleItems = React.useMemo(
+    () => (needOrderOnly ? items.filter((i) => i.stockStatusId === 1) : items),
+    [items, needOrderOnly]
+  );
+
   const stats = React.useMemo(() => {
     const total = items.length;
     const needOrder = items.filter((i) => i.stockStatusId === 1).length;
@@ -778,6 +795,19 @@ export default function StockControlShow() {
         </Stack>
       )}
 
+      {/* Filtro activo "solo Generar Pedido" (llegada desde el dashboard). Chip
+          quitable para volver a ver todo el control. */}
+      {needOrderOnly && (
+        <Box sx={{ mb: 1 }}>
+          <Chip
+            label={`Filtrando: Generar Pedido (${visibleItems.length})`}
+            color="error"
+            variant="outlined"
+            onDelete={() => setNeedOrderOnly(false)}
+          />
+        </Box>
+      )}
+
       {/* Barra de selección para órdenes parciales */}
       {control && orderableIds.length > 0 && (
         <Stack direction="row" spacing={1} sx={{ mb: 1 }} alignItems="center">
@@ -802,7 +832,7 @@ export default function StockControlShow() {
       ) : (
         <Box sx={{ flex: 1, width: "100%" }}>
           <DataGrid
-            rows={items}
+            rows={visibleItems}
             columns={columns}
             checkboxSelection
             disableRowSelectionOnClick
