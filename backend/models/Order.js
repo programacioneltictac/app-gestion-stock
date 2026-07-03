@@ -6,6 +6,22 @@ const Setting = require("./Setting");
 // ninguna orden, aunque su estado de stock sea "Generar Pedido").
 const NON_REPLENISHABLE_CONDITION_ID = 4;
 
+// Estados terminales de una orden: una vez aquí, la orden está "archivada" y no
+// se mezcla con las de gestión. Espeja ORDER_STATUSES_TERMINAL del frontend
+// (react-frontend/src/data/orders.js). El listado separa por este criterio.
+const ORDER_TERMINAL_STATUSES = ["finalizado", "cancelado"];
+
+// Devuelve la cláusula WHERE (sin la palabra WHERE) que filtra por grupo de
+// estado. statusGroup: 'active' (en gestión, no terminales) | 'archived'
+// (finalizadas/canceladas) | 'all' (sin filtro). Usa una lista literal segura
+// (constantes internas, no input de usuario).
+const statusGroupClause = (statusGroup) => {
+  const list = ORDER_TERMINAL_STATUSES.map((s) => `'${s}'`).join(", ");
+  if (statusGroup === "archived") return `status IN (${list})`;
+  if (statusGroup === "all") return "TRUE";
+  return `status NOT IN (${list})`; // 'active' (default)
+};
+
 class Order {
 
   // ============================================================
@@ -389,11 +405,15 @@ class Order {
 
   /**
    * Lista ordenes por sucursal con totales (usa vista v_order_summary).
+   * statusGroup separa activas (en gestión) de archivadas (finalizadas/
+   * canceladas). El filtro se aplica ANTES del LIMIT, así un grupo nunca
+   * desplaza al otro fuera del tope.
    */
-  static async findByBranch(branchId, limit = 24) {
+  static async findByBranch(branchId, limit = 24, statusGroup = "active") {
     const result = await pool.query(
       `SELECT * FROM v_order_summary
        WHERE branch_id = $1
+         AND ${statusGroupClause(statusGroup)}
        ORDER BY created_at DESC
        LIMIT $2`,
       [branchId, parseInt(limit)]
@@ -402,11 +422,13 @@ class Order {
   }
 
   /**
-   * Lista todas las ordenes (para admin/manager).
+   * Lista todas las ordenes (para admin/manager). Ver findByBranch para el
+   * criterio de statusGroup (activas vs archivadas).
    */
-  static async findAll(limit = 50) {
+  static async findAll(limit = 50, statusGroup = "active") {
     const result = await pool.query(
       `SELECT * FROM v_order_summary
+       WHERE ${statusGroupClause(statusGroup)}
        ORDER BY created_at DESC
        LIMIT $1`,
       [parseInt(limit)]

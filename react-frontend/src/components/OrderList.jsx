@@ -8,6 +8,8 @@ import Stack from '@mui/material/Stack';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import TextField from '@mui/material/TextField';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
 import { alpha } from '@mui/material/styles';
 import { DataGrid, GridActionsCellItem } from '@mui/x-data-grid';
@@ -67,12 +69,31 @@ export default function OrderList() {
     [setSearchParams]
   );
 
+  // Vista Activas (en gestión) vs Archivadas (finalizadas/canceladas). Vive en la
+  // URL (?view=active|archived, default active) para conservarla al "Volver"
+  // desde una orden. Al cambiar de vista se recarga del backend (no se filtra en
+  // cliente): así el LIMIT del listado no mezcla ni recorta entre grupos.
+  const viewFromUrl = searchParams.get('view');
+  const activeView = viewFromUrl === 'archived' ? 'archived' : 'active';
+
+  const handleViewChange = React.useCallback(
+    (_, val) => {
+      if (!val || val === activeView) return; // ToggleButtonGroup: ignora deselección
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('view', val);
+        return next;
+      });
+    },
+    [setSearchParams, activeView]
+  );
+
   const loadData = React.useCallback(async () => {
     setError(null);
     setIsLoading(true);
     try {
       const [ordersData, branchesData] = await Promise.all([
-        getOrders(isEmployee ? user.branch_id : null),
+        getOrders(isEmployee ? user.branch_id : null, 50, activeView),
         isEmployee ? Promise.resolve([]) : getBranchesList(),
       ]);
       setOrders(ordersData);
@@ -81,7 +102,7 @@ export default function OrderList() {
       setError(err);
     }
     setIsLoading(false);
-  }, [isEmployee, user]);
+  }, [isEmployee, user, activeView]);
 
   React.useEffect(() => {
     loadData();
@@ -336,6 +357,24 @@ export default function OrderList() {
         {!isEmployee && <Tab value="external" label={`Proveedores (${externalOrders.length})`} />}
         <Tab value="internal" label={`Nodo Hub (${internalOrders.length})`} />
       </Tabs>
+
+      {/* Activas (en gestión) vs Archivadas (finalizadas/canceladas). Cambiar de
+          vista recarga del backend con ?view=. El contador acompaña a la vista
+          activa (las órdenes de la otra vista no están cargadas). */}
+      <ToggleButtonGroup
+        size="small"
+        exclusive
+        value={activeView}
+        onChange={handleViewChange}
+        sx={{ mb: 2 }}
+      >
+        <ToggleButton value="active">
+          {activeView === 'active' ? `Activas (${filteredOrders.length})` : 'Activas'}
+        </ToggleButton>
+        <ToggleButton value="archived">
+          {activeView === 'archived' ? `Archivadas (${filteredOrders.length})` : 'Archivadas'}
+        </ToggleButton>
+      </ToggleButtonGroup>
 
       {/* Total estimado de las órdenes visibles (dinámico: cambia con el tab y
           los filtros de estado/proveedor). Banner de ancho completo con fondo

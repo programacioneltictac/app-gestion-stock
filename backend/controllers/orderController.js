@@ -74,19 +74,23 @@ const createFromControl = async (req, res) => {
 const getOrders = async (req, res) => {
   try {
     const { limit = 50 } = req.query;
+    // view separa el listado en activas (en gestión) vs archivadas
+    // (finalizadas/canceladas). Default 'active'. Cualquier valor no reconocido
+    // cae a 'active' para no exponer todo por error.
+    const statusGroup = req.query.view === "archived" ? "archived" : "active";
 
     let orders;
     if (req.user.role === "employee") {
-      orders = await Order.findByBranch(req.user.branch_id, limit);
+      orders = await Order.findByBranch(req.user.branch_id, limit, statusGroup);
     } else {
       const { branch_id } = req.query;
       if (branch_id) {
         if (!canAccessBranch(req.user, parseInt(branch_id))) {
           return res.status(403).json({ status: "error", message: "No tienes acceso a esta sucursal" });
         }
-        orders = await Order.findByBranch(parseInt(branch_id), limit);
+        orders = await Order.findByBranch(parseInt(branch_id), limit, statusGroup);
       } else {
-        orders = await Order.findAll(limit);
+        orders = await Order.findAll(limit, statusGroup);
       }
     }
 

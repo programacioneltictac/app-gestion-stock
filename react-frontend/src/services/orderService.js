@@ -8,10 +8,12 @@ class OrderService {
     });
   }
 
-  async getOrders(branchId = null, limit = 50) {
+  async getOrders(branchId = null, limit = 50, view = 'active') {
     const params = new URLSearchParams();
     if (branchId) params.set('branch_id', branchId);
     if (limit) params.set('limit', limit);
+    // 'active' = en gestión (default backend); 'archived' = finalizadas/canceladas.
+    if (view === 'archived') params.set('view', 'archived');
     const qs = params.toString();
     return apiClient.get(`/orders${qs ? `?${qs}` : ''}`);
   }

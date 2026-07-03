@@ -148,8 +148,8 @@ function transformOrderItemFromBackend(item) {
   };
 }
 
-export async function getOrders(branchId = null, limit = 50) {
-  const data = await orderService.getOrders(branchId, limit);
+export async function getOrders(branchId = null, limit = 50, view = 'active') {
+  const data = await orderService.getOrders(branchId, limit, view);
   return (data.orders || []).map(transformOrderFromBackend);
 }
 
