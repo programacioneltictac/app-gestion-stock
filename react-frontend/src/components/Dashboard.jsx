@@ -239,10 +239,15 @@ export default function Dashboard() {
                 {data.muyPrioritarios.map((r) => (
                   <ListItemButton
                     key={`mp-${r.controlId}`}
-                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?filter=needorder`)}
+                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?filter=muyprioritario`)}
                   >
                     <ListItemText primary={`${r.branchName} — ${r.categoryName}`} />
-                    <Chip label={r.faltantes} color="error" size="small" />
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Typography variant="body2" color="error.main" fontWeight={500}>
+                        {formatCurrency(r.faltanteValor)}
+                      </Typography>
+                      <Chip label={r.faltantes} color="error" size="small" />
+                    </Stack>
                   </ListItemButton>
                 ))}
               </List>
@@ -297,9 +302,14 @@ export default function Dashboard() {
                     onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?tab=discontinued`)}
                   >
                     <ListItemText primary={`${r.branchName} — ${r.categoryName}`} />
-                    <Typography variant="body2" fontWeight={500} color="secondary.main">
-                      {formatCurrency(r.value)}
-                    </Typography>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Typography variant="body2" color="text.secondary">
+                        {r.units} u.
+                      </Typography>
+                      <Typography variant="body2" fontWeight={500} color="secondary.main">
+                        {formatCurrency(r.value)}
+                      </Typography>
+                    </Stack>
                   </ListItemButton>
                 ))}
               </List>

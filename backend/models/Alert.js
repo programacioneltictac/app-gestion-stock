@@ -39,11 +39,17 @@ class Alert {
               mc.branch_id,
               b.name          AS branch_name,
               c.category_name,
-              COUNT(*)        AS faltantes
+              COUNT(*)        AS faltantes,
+              -- Faltante valorizado: unidades que faltan para llegar al requerido,
+              -- al costo estimado (mismo fallback que órdenes/valorizado). Los
+              -- LEFT JOIN son 1:1 por product_stock_id, no alteran el COUNT.
+              COALESCE(SUM((sc.stock_require - sc.stock_current) * ${COST_EXPR}), 0) AS faltante_valor
        FROM stock_controls sc
        JOIN monthly_controls mc ON sc.monthly_control_id = mc.id
        JOIN branches b   ON mc.branch_id = b.id
        LEFT JOIN categories c ON mc.category_id = c.id
+       LEFT JOIN product_stock_by_branch psb ON psb.id = sc.product_stock_id
+       LEFT JOIN products p ON psb.product_id = p.id
        WHERE sc.stock_status_id = 1
          AND sc.condition_id = ${MUY_PRIORITARIO_CONDITION_ID}
          AND sc.ordered_at IS NULL
@@ -119,6 +125,7 @@ class Alert {
               mc.branch_id,
               b.name        AS branch_name,
               c.category_name,
+              SUM(psb.stock)                AS units,
               SUM(psb.stock * ${COST_EXPR}) AS value
        FROM monthly_controls mc
        JOIN branches b   ON mc.branch_id = b.id

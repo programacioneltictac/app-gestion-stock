@@ -206,7 +206,7 @@ export default function StockControlList() {
           return `${Number(value).toFixed(1)}%`;
         },
       },
-      { field: "needOrderItems", headerName: "Pedidos", width: 100 },
+      { field: "needOrderItems", headerName: "En falta", width: 100 },
       { field: "optimalItems", headerName: "Óptimo", width: 100 },
       { field: "excessItems", headerName: "Sobrestock", width: 100 },
       {

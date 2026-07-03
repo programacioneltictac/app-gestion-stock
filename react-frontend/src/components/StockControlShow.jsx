@@ -50,6 +50,10 @@ const STOCK_STATUS_COLOR = { 1: "error", 2: "success", 3: "warning", 4: "warning
 // reposición (no se pueden seleccionar para generar orden). Espeja la regla
 // del backend en Order.createFromControl.
 const NON_REPLENISHABLE_CONDITION_ID = 4;
+// Condición 'MUY PRIORITARIO' (id 3): usada por el filtro de llegada desde la
+// tarjeta "Faltantes MUY PRIORITARIOS" del dashboard, para que el control
+// muestre exactamente los mismos ítems que contó esa tarjeta.
+const MUY_PRIORITARIO_CONDITION_ID = 3;
 
 // ¿Este ítem se puede pedir? Debe estar en "Generar Pedido" (1), no haber sido
 // ya pedido, y no ser 'NUEVA MARCA'.
@@ -119,12 +123,16 @@ export default function StockControlShow() {
     searchParams.get("tab") === "discontinued" ? "discontinued" : "control"
   );
 
-  // Filtro "solo Generar Pedido": se activa al entrar desde el dashboard
-  // (tarjeta/lista "Faltantes MUY PRIORITARIOS" → ?filter=needorder). Muestra en
-  // la tabla del control solo los ítems en estado generar_pedido (status 1). Es
-  // quitable con un chip para volver a ver todo el control.
-  const [needOrderOnly, setNeedOrderOnly] = React.useState(
-    searchParams.get("filter") === "needorder"
+  // Filtro de llegada desde el dashboard, quitable con un chip. Dos modos:
+  //  - "needorder": todos los ítems en "Generar Pedido" (status 1).
+  //  - "muyprioritario": solo los faltantes MUY PRIORITARIOS y aún sin pedir,
+  //    idéntico a lo que cuenta la tarjeta "Faltantes MUY PRIORITARIOS" del
+  //    dashboard, para que el número del control coincida con el de la tarjeta.
+  const initialFilter = searchParams.get("filter");
+  const [filterMode, setFilterMode] = React.useState(
+    initialFilter === "needorder" || initialFilter === "muyprioritario"
+      ? initialFilter
+      : null
   );
   const [discontinued, setDiscontinued] = React.useState([]);
   const [discLoaded, setDiscLoaded] = React.useState(false);
@@ -578,23 +586,44 @@ export default function StockControlShow() {
     []
   );
 
-  // Filas visibles en la tabla del control. Con el filtro "solo Generar Pedido"
-  // activo, se muestran únicamente los ítems en estado generar_pedido (1). La
+  // Filas visibles en la tabla del control según el filtro de llegada. La
   // selección para órdenes sigue basada en `items` completo (isOrderable), así
   // que el filtro es solo de visualización.
-  const visibleItems = React.useMemo(
-    () => (needOrderOnly ? items.filter((i) => i.stockStatusId === 1) : items),
-    [items, needOrderOnly]
-  );
+  //  - "needorder": todos los ítems en "Generar Pedido" (status 1).
+  //  - "muyprioritario": faltantes MUY PRIORITARIOS aún sin pedir (mismo criterio
+  //    que la tarjeta del dashboard: status 1 + condición 3 + ordered_at NULL).
+  const visibleItems = React.useMemo(() => {
+    if (filterMode === "muyprioritario") {
+      return items.filter(
+        (i) =>
+          i.stockStatusId === 1 &&
+          i.conditionId === MUY_PRIORITARIO_CONDITION_ID &&
+          !i.orderedAt
+      );
+    }
+    if (filterMode === "needorder") {
+      return items.filter((i) => i.stockStatusId === 1);
+    }
+    return items;
+  }, [items, filterMode]);
 
   const stats = React.useMemo(() => {
     const total = items.length;
     const needOrder = items.filter((i) => i.stockStatusId === 1).length;
     const optimal = items.filter((i) => i.stockStatusId === 2).length;
     const excess = items.filter((i) => i.stockStatusId === 3).length;
+    // Faltantes reponibles todavía sin pedir (sin chip "Pedido a...").
+    // Excluye 'NUEVA MARCA' (no reponible), óptimos y sobrestock. Es la cifra
+    // accionable: cuántos faltantes quedan por gestionar en una orden.
+    const unmanaged = items.filter(
+      (i) =>
+        i.stockStatusId === 1 &&
+        i.conditionId !== NON_REPLENISHABLE_CONDITION_ID &&
+        !i.orderedAt
+    ).length;
     const avg =
       total > 0 ? items.reduce((sum, i) => sum + (Number(i.compliance) || 0), 0) / total : 0;
-    return { total, needOrder, optimal, excess, avg };
+    return { total, needOrder, optimal, excess, unmanaged, avg };
   }, [items]);
 
   const canAdd =
@@ -681,10 +710,13 @@ export default function StockControlShow() {
             size="small"
           />
           <Typography variant="body2">Total: <strong>{stats.total}</strong></Typography>
-          <Typography variant="body2" color="error.main">Pedido: <strong>{stats.needOrder}</strong></Typography>
+          <Typography variant="body2" color="error.main">En falta: <strong>{stats.needOrder}</strong></Typography>
           <Typography variant="body2" color="success.main">Óptimo: <strong>{stats.optimal}</strong></Typography>
           <Typography variant="body2" color="warning.main">Sobrestock: <strong>{stats.excess}</strong></Typography>
           <Typography variant="body2">Compliance: <strong>{stats.avg.toFixed(1)}%</strong></Typography>
+          <Tooltip title="Faltantes reponibles todavía sin pedir (sin orden en gestión)">
+            <Typography variant="body2" color="warning.main">Sin gestionar: <strong>{stats.unmanaged}</strong></Typography>
+          </Tooltip>
           {formatSyncDate(lastSyncAt) && (
             <Typography variant="body2" color="text.secondary" sx={{ ml: "auto" }}>
               Última sync: <strong>{formatSyncDate(lastSyncAt)}</strong>
@@ -795,15 +827,19 @@ export default function StockControlShow() {
         </Stack>
       )}
 
-      {/* Filtro activo "solo Generar Pedido" (llegada desde el dashboard). Chip
-          quitable para volver a ver todo el control. */}
-      {needOrderOnly && (
+      {/* Filtro activo de llegada desde el dashboard. Chip quitable para volver
+          a ver todo el control. El texto refleja el modo. */}
+      {filterMode && (
         <Box sx={{ mb: 1 }}>
           <Chip
-            label={`Filtrando: Generar Pedido (${visibleItems.length})`}
+            label={
+              filterMode === "muyprioritario"
+                ? `Filtrando: MUY PRIORITARIOS en falta (${visibleItems.length})`
+                : `Filtrando: Generar Pedido (${visibleItems.length})`
+            }
             color="error"
             variant="outlined"
-            onDelete={() => setNeedOrderOnly(false)}
+            onDelete={() => setFilterMode(null)}
           />
         </Box>
       )}

@@ -10,6 +10,7 @@ export async function getAlerts() {
       branchName: r.branch_name,
       categoryName: r.category_name || '',
       faltantes: Number(r.faltantes || 0),
+      faltanteValor: Number(r.faltante_valor || 0),
     })),
     criticalBranches: (data.criticalBranches || []).map((r) => ({
       branchId: r.branch_id,
@@ -32,6 +33,7 @@ export async function getAlerts() {
       branchId: r.branch_id,
       branchName: r.branch_name,
       categoryName: r.category_name || '',
+      units: Number(r.units || 0),
       value: Number(r.value || 0),
     })),
   };

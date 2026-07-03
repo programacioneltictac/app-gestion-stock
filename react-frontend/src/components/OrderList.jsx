@@ -3,11 +3,13 @@ import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
+import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { alpha } from '@mui/material/styles';
 import { DataGrid, GridActionsCellItem } from '@mui/x-data-grid';
 import { dataGridClickableSx, dataGridLoadingSlotProps } from './dataGridStyles';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -108,6 +110,14 @@ export default function OrderList() {
   }, [orders]);
 
   const filteredOrders = activeTab === 'internal' ? internalOrders : externalOrders;
+
+  // Importe total estimado de las órdenes visibles (respeta tab + filtros de
+  // estado/proveedor). Es un estimado: totalCostEstimate usa el costo con
+  // fallback (avg_cost → cost_price → promedio del grupo), no el facturado.
+  const totalEstimate = React.useMemo(
+    () => filteredOrders.reduce((sum, o) => sum + (Number(o.totalCostEstimate) || 0), 0),
+    [filteredOrders]
+  );
 
   // Al abrir una orden, recordamos el tab de origen para que su "Volver"
   // regrese a la misma pestaña (Proveedores / Nodo Hub).
@@ -326,6 +336,44 @@ export default function OrderList() {
         {!isEmployee && <Tab value="external" label={`Proveedores (${externalOrders.length})`} />}
         <Tab value="internal" label={`Nodo Hub (${internalOrders.length})`} />
       </Tabs>
+
+      {/* Total estimado de las órdenes visibles (dinámico: cambia con el tab y
+          los filtros de estado/proveedor). Banner de ancho completo con fondo
+          primario tenue: usa tokens del theme (alpha sobre primary.main) para
+          contrastar bien en modo claro y oscuro. */}
+      <Paper
+        variant="outlined"
+        sx={{
+          mb: 2,
+          px: 2,
+          py: 1.5,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 1,
+          borderColor: 'primary.main',
+          bgcolor: (theme) => alpha(theme.palette.primary.main, 0.08),
+        }}
+      >
+        <Box>
+          <Typography
+            variant="overline"
+            sx={{ color: 'primary.main', fontWeight: 700, letterSpacing: 0.5, lineHeight: 1.2 }}
+          >
+            Total estimado
+          </Typography>
+          <Typography variant="caption" display="block" color="text.secondary">
+            {filteredOrders.length} orden{filteredOrders.length === 1 ? '' : 'es'}
+          </Typography>
+        </Box>
+        <Typography
+          variant="h5"
+          sx={{ color: 'primary.main', fontWeight: 700 }}
+        >
+          {formatCurrency(totalEstimate)}
+        </Typography>
+      </Paper>
 
       {error ? (
         <Alert severity="error">{error.message}</Alert>
