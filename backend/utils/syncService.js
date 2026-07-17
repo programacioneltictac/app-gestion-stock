@@ -505,6 +505,37 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
       [branch.id],
     );
 
+    // Liberar por STOCK REAL: complemento objetivo de la liberacion anterior.
+    // Un item pedido cuyo stock recien sincronizado quedo en optimo (2) o
+    // sobrestock (3) tiene el faltante cubierto por los numeros, aunque nadie
+    // lo haya finalizado (cubre el caso "la mercaderia entro pero nadie
+    // finalizo", donde el chip quedaba trabado indefinidamente). Solo se toca
+    // el control: las lineas de la orden NO se marcan (completed_at queda como
+    // este) para no pisar la marca humana de gestion; la orden se cierra a
+    // mano como siempre. Falso positivo aceptado: si el stock subio por otra
+    // causa (devolucion, ajuste en IDUO) se libera igual, pero al quedar en
+    // optimo/sobrestock no invita a repedir. Parciales (<70%, status 1) NO
+    // liberan.
+    const releasedByStock = await client.query(
+      `UPDATE stock_controls sc
+       SET ordered_at      = NULL,
+           order_detail_id = NULL,
+           updated_at      = NOW()
+       FROM monthly_controls mc
+       WHERE sc.monthly_control_id = mc.id
+         AND mc.branch_id = $1
+         AND mc.status IN ('draft', 'completed')
+         AND sc.ordered_at IS NOT NULL
+         AND sc.stock_status_id IN (2, 3)
+       RETURNING sc.id`,
+      [branch.id],
+    );
+    if (releasedByStock.rowCount > 0) {
+      console.log(
+        `Sucursal ${branch.name}: ${releasedByStock.rowCount} item(s) pedido(s) liberado(s) por stock cubierto (ids: ${releasedByStock.rows.map((r) => r.id).join(", ")})`,
+      );
+    }
+
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
