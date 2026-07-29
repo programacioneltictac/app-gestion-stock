@@ -57,13 +57,14 @@ export default function OrderShow() {
   const notifications = useNotifications();
   const { user } = useAuth();
 
-  // Tab de origen (Proveedores / Nodo Hub) para que "Volver" regrese al mismo.
-  // Lo pasa OrderList vía state al abrir la orden; si no viene (acceso directo),
-  // se vuelve a /orders sin tab y la lista usa su default.
-  const fromTab = location.state?.fromTab;
+  // Estado de la lista de origen (tab, vista y filtros) serializado como query
+  // string. Lo pasa OrderList vía state al abrir la orden, para que "Volver"
+  // devuelva a la pantalla exacta de la que se salió. Si no viene (acceso
+  // directo por URL o recarga), se vuelve a /orders y la lista usa sus defaults.
+  const fromList = location.state?.fromList;
   const backToList = React.useCallback(() => {
-    navigate(fromTab ? `/orders?tab=${fromTab}` : '/orders');
-  }, [navigate, fromTab]);
+    navigate(fromList ? `/orders?${fromList}` : '/orders');
+  }, [navigate, fromList]);
 
   const [order, setOrder] = React.useState(null);
   const [items, setItems] = React.useState([]);

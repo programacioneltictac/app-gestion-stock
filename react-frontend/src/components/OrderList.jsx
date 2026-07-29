@@ -36,18 +36,37 @@ export default function OrderList() {
   const notifications = useNotifications();
   const { user } = useAuth();
 
-  // Estado inicial opcional desde la URL (?status=...), p.ej. acceso directo
-  // desde las tarjetas del dashboard ("Órdenes pendientes" / "autorizadas").
+  // TODO el estado de la vista (tab, vista activa/archivada y los tres filtros)
+  // vive en la URL, no en useState. Así el "Volver" de OrderShow puede restituir
+  // la pantalla exacta con solo reponer la query string, y los enlaces del
+  // dashboard (?tab=...&status=...) siguen siendo un caso más de lo mismo.
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialStatus = searchParams.get('status') || '';
 
   const [orders, setOrders] = React.useState([]);
   const [branches, setBranches] = React.useState([]);
-  const [filterBranch, setFilterBranch] = React.useState('');
-  const [filterSupplier, setFilterSupplier] = React.useState('');
-  const [filterStatus, setFilterStatus] = React.useState(initialStatus);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
+
+  const filterBranch = searchParams.get('branch') || '';
+  const filterSupplier = searchParams.get('supplier') || '';
+  const filterStatus = searchParams.get('status') || '';
+
+  // Escribe un filtro en la URL (o lo borra si queda vacío, para no arrastrar
+  // parámetros muertos). replace: no ensucia el historial al tipear filtros.
+  const setFilterParam = React.useCallback(
+    (key, value) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (value) next.set(key, String(value));
+          else next.delete(key);
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
 
   const isEmployee = user?.role === 'employee';
   // Las ordenes externas (proveedor) las gestiona compras: solo admin/manager.
@@ -87,6 +106,22 @@ export default function OrderList() {
     },
     [setSearchParams, activeView]
   );
+
+  // Deja tab y view explícitos en la URL aunque el usuario no los haya tocado
+  // (llegada desde el menú o desde el dashboard). Sin esto, la query que se le
+  // pasa a la orden podría no llevarlos y el "Volver" caería en los defaults.
+  React.useEffect(() => {
+    if (tabFromUrl === activeTab && viewFromUrl === activeView) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', activeTab);
+        next.set('view', activeView);
+        return next;
+      },
+      { replace: true }
+    );
+  }, [tabFromUrl, viewFromUrl, activeTab, activeView, setSearchParams]);
 
   const loadData = React.useCallback(async () => {
     setError(null);
@@ -140,12 +175,16 @@ export default function OrderList() {
     [filteredOrders]
   );
 
-  // Al abrir una orden, recordamos el tab de origen para que su "Volver"
-  // regrese a la misma pestaña (Proveedores / Nodo Hub).
-  const handleRowView = React.useCallback(
-    (order) => () => navigate(`/orders/${order.id}`, { state: { fromTab: activeTab } }),
-    [navigate, activeTab]
+  // Al abrir una orden le pasamos la query string completa de la lista (tab,
+  // vista y filtros) para que su "Volver" restituya la pantalla tal cual estaba.
+  // Pasar la query entera y no campo por campo evita tener que tocar esto cada
+  // vez que se agregue un filtro nuevo.
+  const listQuery = searchParams.toString();
+  const openOrder = React.useCallback(
+    (orderId) => navigate(`/orders/${orderId}`, { state: { fromList: listQuery } }),
+    [navigate, listQuery]
   );
+  const handleRowView = React.useCallback((order) => () => openOrder(order.id), [openOrder]);
 
   const handleRowDelete = React.useCallback(
     (order) => async () => {
@@ -318,7 +357,7 @@ export default function OrderList() {
               options={supplierOptions}
               getOptionLabel={(o) => o.name || ''}
               value={supplierOptions.find((s) => String(s.id) === String(filterSupplier)) || null}
-              onChange={(_, val) => setFilterSupplier(val ? val.id : '')}
+              onChange={(_, val) => setFilterParam('supplier', val ? val.id : '')}
               isOptionEqualToValue={(o, v) => o.id === v.id}
               renderInput={(params) => <TextField {...params} label="Proveedor" />}
               sx={{ minWidth: 240 }}
@@ -329,7 +368,7 @@ export default function OrderList() {
               options={branches}
               getOptionLabel={(o) => o.name || ''}
               value={branches.find((b) => String(b.id) === String(filterBranch)) || null}
-              onChange={(_, val) => setFilterBranch(val ? val.id : '')}
+              onChange={(_, val) => setFilterParam('branch', val ? val.id : '')}
               isOptionEqualToValue={(o, v) => o.id === v.id}
               renderInput={(params) => <TextField {...params} label="Sucursal" />}
               sx={{ minWidth: 200 }}
@@ -340,7 +379,7 @@ export default function OrderList() {
             options={ORDER_STATUSES}
             getOptionLabel={(s) => getOrderStatusLabel(s)}
             value={filterStatus || null}
-            onChange={(_, val) => setFilterStatus(val || '')}
+            onChange={(_, val) => setFilterParam('status', val || '')}
             renderInput={(params) => <TextField {...params} label="Estado" />}
             sx={{ minWidth: 200 }}
           />
@@ -422,7 +461,7 @@ export default function OrderList() {
             rows={filteredOrders}
             columns={columns}
             disableRowSelectionOnClick
-            onRowClick={({ row }) => navigate(`/orders/${row.id}`, { state: { fromTab: activeTab } })}
+            onRowClick={({ row }) => openOrder(row.id)}
             loading={isLoading}
             autoHeight
             pageSizeOptions={[10, 25, 50]}

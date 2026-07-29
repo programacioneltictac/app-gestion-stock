@@ -22,7 +22,7 @@ import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import ArchiveIcon from "@mui/icons-material/Archive";
 import LockOpenIcon from "@mui/icons-material/LockOpen";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
-import { useParams, useNavigate, useSearchParams } from "react-router";
+import { useParams, useNavigate, useSearchParams, useLocation } from "react-router";
 import { useDialogs } from "../hooks/useDialogs/useDialogs";
 import useNotifications from "../hooks/useNotifications/useNotifications";
 import { useAuth } from "../context/AuthContext";
@@ -90,6 +90,7 @@ function formatSyncDate(iso) {
 export default function StockControlShow() {
   const { branchId, controlId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const dialogs = useDialogs();
   const notifications = useNotifications();
   const { user } = useAuth();
@@ -116,24 +117,35 @@ export default function StockControlShow() {
   const [isGenerating, setIsGenerating] = React.useState(false);
 
   // Tab activa: 'control' (la tabla del control) | 'discontinued' (solo lectura).
-  // Permite abrir directo en discontinuos via ?tab=discontinued (acceso desde el
-  // dashboard, tarjeta de stock discontinuo).
-  const [searchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = React.useState(
-    searchParams.get("tab") === "discontinued" ? "discontinued" : "control"
-  );
+  // Vive en la URL (?tab=discontinued) para que sobreviva a una recarga y para
+  // que el "Volver" de la lista de controles pueda restituirla. También es el
+  // acceso directo desde el dashboard (tarjeta de stock discontinuo).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") === "discontinued" ? "discontinued" : "control";
 
   // Filtro de llegada desde el dashboard, quitable con un chip. Dos modos:
   //  - "needorder": todos los ítems en "Generar Pedido" (status 1).
   //  - "muyprioritario": solo los faltantes MUY PRIORITARIOS y aún sin pedir,
   //    idéntico a lo que cuenta la tarjeta "Faltantes MUY PRIORITARIOS" del
   //    dashboard, para que el número del control coincida con el de la tarjeta.
-  const initialFilter = searchParams.get("filter");
-  const [filterMode, setFilterMode] = React.useState(
-    initialFilter === "needorder" || initialFilter === "muyprioritario"
-      ? initialFilter
-      : null
-  );
+  // También vive en la URL: al quitar el chip se limpia ?filter y al volver
+  // desde otra pantalla el control reaparece con el mismo recorte.
+  const filterFromUrl = searchParams.get("filter");
+  const filterMode =
+    filterFromUrl === "needorder" || filterFromUrl === "muyprioritario"
+      ? filterFromUrl
+      : null;
+
+  const clearFilterMode = React.useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("filter");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [setSearchParams]);
   const [discontinued, setDiscontinued] = React.useState([]);
   const [discLoaded, setDiscLoaded] = React.useState(false);
   const [isLoadingDisc, setIsLoadingDisc] = React.useState(false);
@@ -189,9 +201,16 @@ export default function StockControlShow() {
   }, [controlId, notifications]);
 
   const handleChangeTab = React.useCallback((_, val) => {
-    setActiveTab(val);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("tab", val);
+        return next;
+      },
+      { replace: true }
+    );
     if (val === "discontinued" && !discLoaded) loadDiscontinued();
-  }, [discLoaded, loadDiscontinued]);
+  }, [discLoaded, loadDiscontinued, setSearchParams]);
 
   // Si se entró directo en la tab de discontinuos (?tab=discontinued), dispara la
   // carga lazy una vez al montar.
@@ -200,9 +219,13 @@ export default function StockControlShow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // "Volver" respeta de dónde se entró: si el origen mandó un destino explícito
+  // (p. ej. el dashboard, vía state), se vuelve ahí; si no, a la lista de
+  // controles de la sucursal, que es el camino natural.
+  const backTo = location.state?.backTo;
   const handleBack = React.useCallback(() => {
-    navigate(`/stock-control/${branchId}`);
-  }, [navigate, branchId]);
+    navigate(backTo || `/stock-control/${branchId}`);
+  }, [navigate, backTo, branchId]);
 
   // Descarga el control completo a un .xlsx con dos hojas (Control + Discontinuos)
   // en el mismo libro. Si los discontinuos aún no se cargaron (no se entró a la
@@ -839,7 +862,7 @@ export default function StockControlShow() {
             }
             color="error"
             variant="outlined"
-            onDelete={() => setFilterMode(null)}
+            onDelete={clearFilterMode}
           />
         </Box>
       )}

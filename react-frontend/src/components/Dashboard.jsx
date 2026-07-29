@@ -239,7 +239,7 @@ export default function Dashboard() {
                 {data.muyPrioritarios.map((r) => (
                   <ListItemButton
                     key={`mp-${r.controlId}`}
-                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?filter=muyprioritario`)}
+                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?filter=muyprioritario`, { state: { backTo: '/' } })}
                   >
                     <ListItemText primary={`${r.branchName} — ${r.categoryName}`} />
                     <Stack direction="row" spacing={1} alignItems="center">
@@ -299,7 +299,7 @@ export default function Dashboard() {
                 {data.discontinuedValue.slice(0, 8).map((r) => (
                   <ListItemButton
                     key={`dv-${r.controlId}`}
-                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?tab=discontinued`)}
+                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?tab=discontinued`, { state: { backTo: '/' } })}
                   >
                     <ListItemText primary={`${r.branchName} — ${r.categoryName}`} />
                     <Stack direction="row" spacing={1} alignItems="center">
