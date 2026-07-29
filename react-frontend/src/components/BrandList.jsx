@@ -88,6 +88,12 @@ export default function BrandList() {
   const handleFilterModelChange = React.useCallback(
     (model) => {
       setFilterModel(model);
+      // Al cambiar el filtro se vuelve a la primera página: el resultado filtrado
+      // suele tener menos páginas que el listado completo, y quedarse en la
+      // página actual pedía un offset vacío (grilla en blanco habiendo
+      // coincidencias).
+      setPaginationModel((prev) => ({ ...prev, page: 0 }));
+      searchParams.set("page", "0");
       if (model.items.length > 0 || model.quickFilterValues?.length > 0) {
         searchParams.set("filter", JSON.stringify(model));
       } else {
@@ -103,7 +109,17 @@ export default function BrandList() {
     setError(null);
     setIsLoading(true);
     try {
-      const search = filterModel?.quickFilterValues?.join(" ") || null;
+      // La grilla está en filterMode="server": MUI no filtra localmente, delega
+      // en el backend. Por eso hay que leer las DOS formas de filtrar, o la que
+      // falte queda sin efecto: el buscador rápido (quickFilterValues) y el
+      // menú de los encabezados (items). Mismo criterio que ProductList.
+      // El backend solo busca por brand_name (Brand.findAllPaginated), así que
+      // únicamente la columna Marca alimenta la búsqueda; Proveedor y Agrupable
+      // no tienen soporte server-side y se declaran no filtrables en `columns`.
+      let search = filterModel?.quickFilterValues?.join(" ") || null;
+      filterModel?.items?.forEach(({ field, value }) => {
+        if (field === "brand_name" && value) search = value;
+      });
       const result = await getBrandsList({ page: paginationModel.page, pageSize: paginationModel.pageSize, search });
       setRowsState({
         rows: result.brands || [],
@@ -206,7 +222,10 @@ export default function BrandList() {
 
   const columns = React.useMemo(
     () => [
-      { field: "id", headerName: "ID", width: 70 },
+      // Solo Marca es filtrable: el listado se pagina y filtra en el servidor,
+      // que únicamente busca por brand_name. Ofrecer el menú de filtro en las
+      // demás columnas mostraría una opción que no puede hacer nada.
+      { field: "id", headerName: "ID", width: 70, filterable: false },
       { field: "brand_name", headerName: "Marca", flex: 1, minWidth: 200 },
       {
         field: "supplier_id",
@@ -234,6 +253,7 @@ export default function BrandList() {
         field: "is_groupable",
         headerName: "Agrupable",
         width: 140,
+        filterable: false,
         renderCell: ({ row }) => (
           <Stack direction="row" alignItems="center" spacing={0.5}>
             <Switch

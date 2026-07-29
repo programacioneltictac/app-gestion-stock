@@ -125,9 +125,14 @@ export const dataGridCustomizations = {
         paddingRight: theme.spacing(3),
         paddingLeft: theme.spacing(3),
       }),
+      // El contenedor aloja el título y el icono de filtro activo. Con
+      // 'space-between' flexbox los mandaba a extremos opuestos: en columnas
+      // anchas (flex: 1) el icono quedaba suelto en el medio del encabezado,
+      // lejos de su texto. 'flex-start' lo mantiene pegado al título.
       columnHeaderTitleContainer: {
         flexGrow: 1,
-        justifyContent: 'space-between',
+        justifyContent: 'flex-start',
+        gap: 4,
       },
       columnHeaderDraggableContainer: { paddingRight: 2 },
       toolbar: ({ theme }) => ({
