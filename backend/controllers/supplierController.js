@@ -1,6 +1,7 @@
 const Supplier = require("../models/Supplier");
 const { syncCompras } = require("../utils/comprasService");
 const { handleControllerError } = require("../utils/errorHelper");
+const { getSyncRunStatus } = require("../utils/scheduler");
 
 // GET /api/suppliers
 const getAllSuppliers = async (req, res) => {
@@ -86,6 +87,20 @@ const deleteSupplier = async (req, res) => {
 // (solo rellena marcas sin proveedor; reporta conflictos; ignora marcas nuevas).
 const syncComprasController = async (req, res) => {
   try {
+    // El sync automático corre stock y DESPUÉS compras: si está en curso, este
+    // pedido manual podría solaparse con esa segunda etapa.
+    const runStatus = getSyncRunStatus();
+    if (runStatus.running) {
+      console.warn(
+        `[compras] Pedido manual rechazado: sync automático en curso (${runStatus.elapsedText}).`,
+      );
+      return res.status(409).json({
+        status: "busy",
+        message: `Sync automático en curso (${runStatus.elapsedText}). Esperá ~${runStatus.remainingMin} min y volvé a intentar.`,
+        ...runStatus,
+      });
+    }
+
     const { monthsBack, desde, hasta } = req.body || {};
     const opts = {};
     if (monthsBack) opts.monthsBack = Number(monthsBack);

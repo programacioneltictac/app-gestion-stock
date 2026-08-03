@@ -1,10 +1,33 @@
 const { syncAllBranches, syncBranch } = require("../utils/syncService");
 const { pool } = require("../database/config");
 const { handleControllerError } = require("../utils/errorHelper");
+const { getSyncRunStatus } = require("../utils/scheduler");
+
+/**
+ * Corta el pedido con 409 si el sync automático está corriendo.
+ * Sin esto el sync manual arrancaría EN PARALELO con el del cron: ambos hacen
+ * "UPDATE stock=0 + re-acumular desde IDUO" y se pisarían. Devuelve true si ya
+ * respondió (el caller debe cortar).
+ */
+const rejectIfSyncRunning = (res) => {
+  const status = getSyncRunStatus();
+  if (!status.running) return false;
+
+  console.warn(
+    `[sync] Pedido manual rechazado: sync automático en curso (${status.elapsedText}).`,
+  );
+  res.status(409).json({
+    status: "busy",
+    message: `Sync automático en curso (${status.elapsedText}). Esperá ~${status.remainingMin} min y volvé a intentar.`,
+    ...status,
+  });
+  return true;
+};
 
 // POST /api/sync/all  — sincroniza todas las sucursales configuradas
 const syncAll = async (req, res) => {
   try {
+    if (rejectIfSyncRunning(res)) return;
     console.log(`Sync iniciado por usuario: ${req.user.username}`);
     const result = await syncAllBranches();
     res.json({ status: "success", ...result });
@@ -16,6 +39,7 @@ const syncAll = async (req, res) => {
 // POST /api/sync/branch/:branch_id  — sincroniza una sucursal específica
 const syncOneBranch = async (req, res) => {
   try {
+    if (rejectIfSyncRunning(res)) return;
     const { branch_id } = req.params;
 
     const branchResult = await pool.query(
