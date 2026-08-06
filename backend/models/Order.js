@@ -1,5 +1,6 @@
 const { pool } = require("../database/config");
 const Setting = require("./Setting");
+const { ORDER_STATUSES_TERMINAL } = require("../utils/orderStatus");
 
 // Condición 'NUEVA MARCA' (id 4): productos nuevos a prueba. Conviven en la hoja
 // de control con el resto pero NO son elegibles para reposición (no entran a
@@ -7,9 +8,16 @@ const Setting = require("./Setting");
 const NON_REPLENISHABLE_CONDITION_ID = 4;
 
 // Estados terminales de una orden: una vez aquí, la orden está "archivada" y no
-// se mezcla con las de gestión. Espeja ORDER_STATUSES_TERMINAL del frontend
-// (react-frontend/src/data/orders.js). El listado separa por este criterio.
-const ORDER_TERMINAL_STATUSES = ["finalizado", "cancelado"];
+// se mezcla con las de gestión. Fuente única: utils/orderStatus.js (espejado en
+// react-frontend/src/data/orders.js). El listado separa por este criterio.
+const ORDER_TERMINAL_STATUSES = ORDER_STATUSES_TERMINAL;
+
+// Cláusula SQL para "reserva viva" del Hub: unidades de órdenes internas que
+// TODAVÍA comprometen stock. Excluye ambos terminales, no solo 'cancelado':
+// al finalizar una orden la mercadería ya salió del Hub y el sync bajó el stock
+// real, así que seguir restándola aquí la descontaría DOS veces — y como
+// 'finalizado' es terminal, esa reserva no se liberaría nunca.
+const LIVE_RESERVATION_SQL = `oc.status NOT IN (${ORDER_TERMINAL_STATUSES.map((s) => `'${s}'`).join(", ")})`;
 
 // Devuelve la cláusula WHERE (sin la palabra WHERE) que filtra por grupo de
 // estado. statusGroup: 'active' (en gestión, no terminales) | 'archived'
@@ -117,7 +125,7 @@ class Order {
                    FROM order_details od
                    JOIN orders_controls oc ON od.order_control_id = oc.id
                    WHERE oc.order_type = 'internal'
-                     AND oc.status <> 'cancelado'
+                     AND ${LIVE_RESERVATION_SQL}
                      AND od.product_stock_id = sc.product_stock_id
                  ), 0) ELSE 0 END,
              1
@@ -197,7 +205,7 @@ class Order {
                  JOIN orders_controls oc ON od.order_control_id = oc.id
                  WHERE oc.order_type = 'internal'
                    AND oc.source_branch_id = $1
-                   AND oc.status <> 'cancelado'
+                   AND ${LIVE_RESERVATION_SQL}
                    AND od.product_stock_id = hub_psb.id
                ), 0) AS reservado
              FROM product_stock_by_branch hub_psb

@@ -1,4 +1,9 @@
 const { pool } = require("../database/config");
+const { ORDER_STATUSES_TERMINAL } = require("../utils/orderStatus");
+
+// Cláusula SQL para "reserva viva" del Hub: unidades de órdenes internas que
+// TODAVÍA comprometen stock. Excluye ambos terminales (ver models/Order.js).
+const LIVE_RESERVATION_SQL = `oc.status NOT IN (${ORDER_STATUSES_TERMINAL.map((s) => `'${s}'`).join(", ")})`;
 
 // Fuente de verdad de los umbrales de compliance → stock_status.
 // 3 estados: < order% genera pedido, [order, overstock] óptimo, > overstock% sobrestock.
@@ -208,13 +213,16 @@ class StockControl {
              AND oc.status <> 'cancelado'
          )                                                       AS order_dest,
          -- Comprometido (solo relevante en el control del Hub): unidades de este
-         -- mismo psb reservadas por ordenes internas abiertas de otras sucursales.
+         -- mismo psb reservadas por ordenes internas VIVAS de otras sucursales.
+         -- Excluye ambos terminales: una orden 'finalizado' ya despacho la
+         -- mercaderia (el sync bajo el stock real), asi que seguir restandola
+         -- aqui la descontaria dos veces y nunca se liberaria.
          COALESCE((
            SELECT SUM(od.quantity_ordered)
            FROM order_details od
            JOIN orders_controls oc ON od.order_control_id = oc.id
            WHERE oc.order_type = 'internal'
-             AND oc.status <> 'cancelado'
+             AND ${LIVE_RESERVATION_SQL}
              AND od.product_stock_id = sc.product_stock_id
          ), 0)                                                   AS committed
        FROM stock_controls sc
