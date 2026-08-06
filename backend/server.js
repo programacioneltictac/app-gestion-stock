@@ -9,6 +9,10 @@ const { authenticateToken, requireRole } = require("./middlewares/auth");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Detrás del proxy de Render: confiar en el primer hop de X-Forwarded-For
+// para que el rate limiting identifique la IP real del cliente.
+app.set("trust proxy", 1);
+
 // Probar conexión al iniciar
 testConnection();
 
