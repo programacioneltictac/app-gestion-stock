@@ -1,22 +1,13 @@
 const { pool } = require("../database/config");
 const BrandTrial = require("./BrandTrial");
+// Costo con fallback (avg_cost local -> cost_price -> promedio del grupo en
+// otras sucursales), compartido con el informe de situación y las órdenes.
+const { COST_EXPR } = require("../utils/costExpr");
 
 // Condición 'MUY PRIORITARIO' (conditions id 3): faltantes de máxima urgencia.
 const MUY_PRIORITARIO_CONDITION_ID = 3;
 // Condición 'NUEVA MARCA' (id 4): no reponible, se excluye de los faltantes.
 const NON_REPLENISHABLE_CONDITION_ID = 4;
-
-// Expresión de costo con fallback (avg_cost local -> cost_price -> promedio del
-// grupo en otras sucursales), idéntica a la usada en órdenes y valorizado.
-const COST_EXPR = `COALESCE(
-  NULLIF(psb.avg_cost, 0),
-  p.cost_price,
-  CASE WHEN psb.group_id IS NOT NULL THEN (
-    SELECT AVG(o.avg_cost) FROM product_stock_by_branch o
-    WHERE o.group_id = psb.group_id AND o.avg_cost > 0
-  ) END,
-  0
-)`;
 
 class Alert {
   /**

@@ -23,9 +23,12 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import SpeedIcon from '@mui/icons-material/Speed';
 import HourglassBottomIcon from '@mui/icons-material/HourglassBottom';
 import ScienceIcon from '@mui/icons-material/Science';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../context/AuthContext';
 import { getAlerts } from '../data/alerts';
+import { getSituation } from '../data/reports';
+import { generateSituationPdf } from '../utils/situationPdf';
 import PageContainer from './PageContainer';
 
 const formatCurrency = (value) =>
@@ -76,6 +79,23 @@ export default function Dashboard() {
     load();
   }, [load]);
 
+  // Descarga del informe de situación. Los datos se piden recién al hacer clic
+  // (son 11 consultas): no tiene sentido cargarlos con el dashboard si el
+  // usuario no va a pedir el PDF. El error se muestra sin tumbar la pantalla.
+  const [isDownloading, setIsDownloading] = React.useState(false);
+  const [reportError, setReportError] = React.useState(null);
+
+  const handleDownloadReport = React.useCallback(async () => {
+    setIsDownloading(true);
+    setReportError(null);
+    try {
+      generateSituationPdf(await getSituation());
+    } catch (err) {
+      setReportError(err);
+    }
+    setIsDownloading(false);
+  }, []);
+
   // Totales para las tarjetas resumen.
   const totals = React.useMemo(() => {
     if (!data) return { muyPrio: 0, critical: 0, discTotal: 0 };
@@ -115,16 +135,38 @@ export default function Dashboard() {
 
   return (
     <PageContainer title="Dashboard" breadcrumbs={[{ title: 'Dashboard' }]}>
-      <Box sx={{ mb: 3 }}>
+      {/* El saludo conserva el ancho completo (queda centrado como antes); el
+          botón se saca del flujo para anclarlo a la derecha sin correrlo. En
+          xs vuelve al flujo normal, debajo del texto. */}
+      <Box sx={{ mb: 3, position: 'relative' }}>
         <Typography variant="h5" gutterBottom>
           Bienvenido, {user?.name || user?.username}
         </Typography>
         <Typography variant="body2" color="text.secondary">
           Alertas tempranas — atendé primero lo más urgente.
         </Typography>
+        <Button
+          variant="outlined"
+          startIcon={isDownloading ? <CircularProgress size={18} /> : <PictureAsPdfIcon />}
+          onClick={handleDownloadReport}
+          disabled={isDownloading}
+          sx={{
+            mt: { xs: 2, sm: 0 },
+            position: { sm: 'absolute' },
+            top: { sm: 0 },
+            right: { sm: 0 },
+          }}
+        >
+          {isDownloading ? 'Generando…' : 'Descargar informe'}
+        </Button>
       </Box>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error.message}</Alert>}
+      {reportError && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setReportError(null)}>
+          {reportError.message || 'No se pudo generar el informe. Volvé a intentar.'}
+        </Alert>
+      )}
 
       {/* Tarjetas resumen — grid responsive: 5 col en desktop (2 filas de 5),
           que se reduce en pantallas chicas. Las tarjetas se rellenan según el rol. */}
