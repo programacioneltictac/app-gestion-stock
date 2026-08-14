@@ -199,6 +199,14 @@ class StockControl {
          psb.last_sync_at,
          -- Destino del pedido: 'hub' / 'external' / 'both' segun los tipos de
          -- orden ligados a este control (un control puede partirse en 2 lineas).
+         -- Este campo solo decide el TEXTO del chip; que el chip se vea o no lo
+         -- decide sc.ordered_at.
+         -- Excluye 'cancelado' pero NO 'finalizado' (no usar liveOrderSql aqui):
+         -- un item finalizado sigue con ordered_at hasta que el sync confirme el
+         -- stock, y en esa ventana el chip debe seguir diciendo "Pedido a Hub" /
+         -- "Pedido a proveedor". Con liveOrderSql quedaria en NULL y caeria al
+         -- label generico "Pedido", perdiendo el destino justo cuando el usuario
+         -- necesita saberlo.
          (
            SELECT CASE
                     WHEN bool_or(oc.order_type = 'internal')

@@ -477,6 +477,13 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
     // Correr DESPUES del update de stock garantiza que el stock_current ya es el
     // real: si el pedido efectivamente entro, el item quedara en optimo y no se
     // repedira (sin ventana de doble pedido).
+    //
+    // OJO: aqui "viva" es 'no cancelada' e INCLUYE a 'finalizado' a proposito —
+    // NO usar liveOrderSql(), que excluye ambos terminales. Este bloque existe
+    // para detectar justamente las finalizadas y liberarlas; con liveOrderSql()
+    // el EXISTS daria falso siempre y no liberaria nada. Es una red de seguridad
+    // para ordenes finalizadas ANTES de este fix (Order.updateStatus ya libera
+    // al pasar a un terminal) y para la finalizacion por item del Hub.
     await client.query(
       `UPDATE stock_controls sc
        SET ordered_at      = NULL,

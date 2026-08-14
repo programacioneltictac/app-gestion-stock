@@ -1,6 +1,6 @@
 const { pool } = require("../database/config");
 const Setting = require("./Setting");
-const { ORDER_STATUSES_TERMINAL } = require("../utils/orderStatus");
+const { ORDER_STATUSES_TERMINAL, liveOrderSql } = require("../utils/orderStatus");
 
 // Condición 'NUEVA MARCA' (id 4): productos nuevos a prueba. Conviven en la hoja
 // de control con el resto pero NO son elegibles para reposición (no entran a
@@ -471,10 +471,23 @@ class Order {
       const order = result.rows[0] || null;
 
       if (order && status === "cancelado") {
-        // Controles ligados a ESTA orden. Se liberan los que ya no tengan
-        // ninguna linea en una orden viva (no cancelada). El propio cancelado de
-        // esta orden ya cuenta como "no viva", asi que su sola presencia no
-        // bloquea la liberacion.
+        // Solo 'cancelado' libera aqui. 'finalizado' NO, aunque tambien sea
+        // terminal: los dos casos NO son equivalentes.
+        //   - cancelado:  el pedido no existio, nunca va a entrar mercaderia.
+        //                 No hay nada que esperar -> liberar ya es correcto.
+        //   - finalizado: la mercaderia se despacho pero el stock de la app
+        //                 TODAVIA no lo refleja (hasta el proximo sync). Liberar
+        //                 aqui dejaria el item en 'generar_pedido' y SIN chip
+        //                 durante toda esa ventana (el sync corre 06:00 y 14:00
+        //                 L-V), asi que otro usuario lo veria como un faltante
+        //                 sin pedir y podria generar una orden DUPLICADA. Muy
+        //                 probable en el Hub, que repone varias veces al dia.
+        // Las finalizadas las libera syncService contra el stock REAL, que es
+        // el unico momento en que la app puede mostrar la realidad.
+        //
+        // Se liberan los controles que no queden con ninguna linea en una orden
+        // viva. El propio cancelado de esta orden ya cuenta como "no viva", asi
+        // que su sola presencia no bloquea la liberacion.
         await client.query(
           `UPDATE stock_controls sc
            SET ordered_at      = NULL,
@@ -491,7 +504,7 @@ class Order {
              FROM order_details od2
              JOIN orders_controls oc2 ON od2.order_control_id = oc2.id
              WHERE od2.stock_control_id = sc.id
-               AND oc2.status <> 'cancelado'
+               AND ${liveOrderSql("oc2")}
            )`,
           [id]
         );
@@ -682,9 +695,10 @@ class Order {
       await client.query("BEGIN");
 
       // Controles ligados a esta orden (via stock_control_id de sus detalles).
-      // Tras borrarla hay que reabrir los que se queden SIN ningun detalle: el
-      // flag "ya pedido" es stock_controls.ordered_at, y un control puede tener
-      // 2 lineas (interna+externa). Solo se reabre si NO le queda ninguna otra.
+      // Tras borrarla hay que reabrir los que se queden sin ninguna linea VIVA:
+      // el flag "ya pedido" es stock_controls.ordered_at, y un control puede
+      // tener 2 lineas (interna+externa). Solo se reabre si no le queda otra
+      // linea en una orden viva.
       const affected = await client.query(
         `SELECT DISTINCT stock_control_id
          FROM order_details
@@ -697,7 +711,9 @@ class Order {
 
       const controlIds = affected.rows.map((r) => r.stock_control_id);
       if (controlIds.length > 0) {
-        // Reabrir (ordered_at = NULL) los controles que ya no tienen detalles.
+        // Reabrir (ordered_at = NULL) los controles sin lineas vivas restantes.
+        // El filtro por estado es imprescindible: sin el, una linea vieja de una
+        // orden ya finalizada/cancelada bloqueaba la liberacion para siempre.
         await client.query(
           `UPDATE stock_controls sc
            SET ordered_at      = NULL,
@@ -705,7 +721,11 @@ class Order {
                updated_at      = NOW()
            WHERE sc.id = ANY($1::int[])
              AND NOT EXISTS (
-               SELECT 1 FROM order_details od WHERE od.stock_control_id = sc.id
+               SELECT 1
+               FROM order_details od
+               JOIN orders_controls oc ON od.order_control_id = oc.id
+               WHERE od.stock_control_id = sc.id
+                 AND ${liveOrderSql("oc")}
              )`,
           [controlIds]
         );
@@ -762,14 +782,19 @@ class Order {
 
       await client.query("DELETE FROM order_details WHERE id = $1", [detailId]);
 
-      // Reabrir el control si ya no le queda NINGUN detalle (respeta Hub).
+      // Reabrir el control si ya no le queda ninguna linea VIVA (respeta Hub:
+      // con linea interna + externa, borrar una sola no lo reabre).
       if (stockControlId) {
         await client.query(
           `UPDATE stock_controls sc
            SET ordered_at = NULL, order_detail_id = NULL, updated_at = NOW()
            WHERE sc.id = $1
              AND NOT EXISTS (
-               SELECT 1 FROM order_details od WHERE od.stock_control_id = sc.id
+               SELECT 1
+               FROM order_details od
+               JOIN orders_controls oc ON od.order_control_id = oc.id
+               WHERE od.stock_control_id = sc.id
+                 AND ${liveOrderSql("oc")}
              )`,
           [stockControlId]
         );
