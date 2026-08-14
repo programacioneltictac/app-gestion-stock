@@ -207,8 +207,20 @@ class StockControl {
          -- "Pedido a proveedor". Con liveOrderSql quedaria en NULL y caeria al
          -- label generico "Pedido", perdiendo el destino justo cuando el usuario
          -- necesita saberlo.
+         --
+         -- 'awaiting_sync' es un 4to valor: TODAS las lineas no canceladas ya
+         -- estan finalizadas, o sea que la mercaderia se despacho pero el sync
+         -- todavia no actualizo stock_current. En esa ventana el item sigue en
+         -- "Generar Pedido" y el chip diria "Pedido a Hub", que es enganoso
+         -- (ya llego). Se rotula aparte para que nadie lo repida.
+         -- El criterio de "finalizada" es el MISMO que usa syncService para
+         -- liberar (via 3): completed_at por item (Hub) O la orden en estado
+         -- 'finalizado' (proveedor, que no tiene finalizacion por item). Deben
+         -- moverse juntos: este chip marca justo lo que el sync va a liberar.
          (
            SELECT CASE
+                    WHEN bool_and(od.completed_at IS NOT NULL
+                                  OR oc.status = 'finalizado') THEN 'awaiting_sync'
                     WHEN bool_or(oc.order_type = 'internal')
                      AND bool_or(oc.order_type = 'external') THEN 'both'
                     WHEN bool_or(oc.order_type = 'internal')  THEN 'hub'

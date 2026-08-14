@@ -63,11 +63,16 @@ const isOrderable = (item) =>
   item.conditionId !== NON_REPLENISHABLE_CONDITION_ID;
 
 // Etiqueta de la píldora "ya pedido" según el destino de la orden.
+// 'awaiting_sync': la mercadería ya se recibió (orden finalizada) pero el sync
+// todavía no actualizó el stock, así que el ítem sigue figurando en "Generar
+// Pedido". Se avisa explícitamente para que nadie lo vuelva a pedir; el chip
+// desaparece solo cuando el sync confirme el stock real.
 const ORDER_DEST_LABELS = {
-  hub:      { label: "Pedido a Hub",          color: "info",      tooltip: "Pedido al Nodo Hub (orden interna)" },
-  external: { label: "Pedido a proveedor",    color: "secondary", tooltip: "Pedido a proveedor (orden externa)" },
-  both:     { label: "Pedido (Hub+proveedor)", color: "primary",  tooltip: "Pedido parcial al Hub y el resto a proveedor" },
-  default:  { label: "Pedido",                color: "info",      tooltip: "Ya enviado a una orden de reposición" },
+  hub:           { label: "Pedido a Hub",           color: "info",      tooltip: "Pedido al Nodo Hub (orden interna)" },
+  external:      { label: "Pedido a proveedor",     color: "secondary", tooltip: "Pedido a proveedor (orden externa)" },
+  both:          { label: "Pedido (Hub+proveedor)", color: "primary",   tooltip: "Pedido parcial al Hub y el resto a proveedor" },
+  awaiting_sync: { label: "Recibido, esperando sync", color: "success", tooltip: "La mercadería ya se recibió. El stock se actualiza en la próxima sincronización: NO hace falta volver a pedirlo" },
+  default:       { label: "Pedido",                 color: "info",      tooltip: "Ya enviado a una orden de reposición" },
 };
 
 const formatCurrency = (value) =>

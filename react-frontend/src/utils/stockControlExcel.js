@@ -13,6 +13,7 @@ const ORDER_DEST_TEXT = {
   hub: 'Pedido a Hub',
   external: 'Pedido a proveedor',
   both: 'Pedido (Hub+proveedor)',
+  awaiting_sync: 'Recibido, esperando sync',
 };
 
 const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1976D2' } };

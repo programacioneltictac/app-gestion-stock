@@ -60,7 +60,7 @@ function transformStockItemFromBackend(item) {
     updatedAt: item.updated_at,
     orderedAt: item.ordered_at || null,
     orderDetailId: item.order_detail_id || null,
-    orderDest: item.order_dest || null, // 'hub' | 'external' | 'both' | null
+    orderDest: item.order_dest || null, // 'hub' | 'external' | 'both' | 'awaiting_sync' | null
     committed: Number(item.committed || 0),
   };
 }
