@@ -56,6 +56,25 @@ function SummaryCard({ icon, label, value, color, onClick }) {
   );
 }
 
+// Umbrales del tiempo de ciclo, en dias, por tipo de orden. Son DISTINTOS a
+// proposito: un ciclo de proveedor depende del plazo de entrega (13-14 dias es
+// lo normal), mientras que una orden interna del Hub se resuelve en 2-3 dias.
+// Un umbral unico dejaria a proveedor siempre en rojo y al Hub siempre en azul,
+// y el color no informaria nada. Valores definidos por el negocio (2026-08-24).
+const CYCLE_THRESHOLDS = {
+  supplier: { warning: 15, error: 20 },
+  hub: { warning: 3, error: 5 },
+};
+
+// info (normal) -> warning -> error, segun los cortes de arriba. null (sin
+// cierres en la ventana) no es 0 dias: se muestra "—" y queda en info.
+function cycleColor(days, thresholds) {
+  if (days == null) return 'info';
+  if (days >= thresholds.error) return 'error';
+  if (days >= thresholds.warning) return 'warning';
+  return 'info';
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -240,7 +259,7 @@ export default function Dashboard() {
               ? `${data.cycleTimeSupplierDays} ${data.cycleTimeSupplierDays === 1 ? 'día' : 'días'}`
               : '—'
           }
-          color={data?.cycleTimeSupplierDays != null && data.cycleTimeSupplierDays >= 7 ? 'warning' : 'info'}
+          color={cycleColor(data?.cycleTimeSupplierDays, CYCLE_THRESHOLDS.supplier)}
         />
         <SummaryCard
           icon={<HourglassBottomIcon fontSize="large" />}
@@ -250,7 +269,7 @@ export default function Dashboard() {
               ? `${data.cycleTimeHubDays} ${data.cycleTimeHubDays === 1 ? 'día' : 'días'}`
               : '—'
           }
-          color={data?.cycleTimeHubDays != null && data.cycleTimeHubDays >= 7 ? 'warning' : 'info'}
+          color={cycleColor(data?.cycleTimeHubDays, CYCLE_THRESHOLDS.hub)}
         />
         {(user?.role === 'admin' || user?.role === 'manager') && (
           <SummaryCard
