@@ -63,7 +63,7 @@ function SummaryCard({ icon, label, value, color, onClick }) {
 // y el color no informaria nada. Valores definidos por el negocio (2026-08-24).
 const CYCLE_THRESHOLDS = {
   supplier: { warning: 15, error: 20 },
-  hub: { warning: 3, error: 5 },
+  hub: { warning: 4, error: 5 },
 };
 
 // info (normal) -> warning -> error, segun los cortes de arriba. null (sin
