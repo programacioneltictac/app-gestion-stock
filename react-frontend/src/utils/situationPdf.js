@@ -187,14 +187,17 @@ export function generateSituationPdf(report) {
   });
   y = doc.lastAutoTable.finalY + 10;
 
-  // ---- 7) Antigüedad y comprometido del Hub --------------------------------
-  const age = report.orderAge;
+  // ---- 7) Tiempo de ciclo y comprometido del Hub ---------------------------
+  // Tiempo de ciclo = cuánto tardamos en CERRAR una orden, promedio de las
+  // finalizadas en los últimos 30 días. Misma definición que el dashboard.
+  // "Cerradas" es el tamaño de muestra del promedio: en 0, el resto va en "—".
+  const cycle = report.orderCycleTime;
   const hub = report.hubCommitted;
-  y = sectionTable(doc, y, 'Antigüedad de órdenes en gestión', {
-    head: [['Tipo', 'Abiertas', 'Promedio', 'Más antigua']],
+  y = sectionTable(doc, y, 'Tiempo prom. de ciclo de órdenes (últimos 30 días)', {
+    head: [['Tipo', 'Cerradas', 'Promedio', 'La que más tardó']],
     body: [
-      ['A proveedor', units(age.openSupplier), days(age.avgDaysSupplier), days(age.maxDaysSupplier)],
-      ['Internas (Hub)', units(age.openHub), days(age.avgDaysHub), days(age.maxDaysHub)],
+      ['A proveedor', units(cycle.closedSupplier), days(cycle.avgDaysSupplier), days(cycle.maxDaysSupplier)],
+      ['Internas (Hub)', units(cycle.closedHub), days(cycle.avgDaysHub), days(cycle.maxDaysHub)],
     ],
     columnStyles: {
       1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' },

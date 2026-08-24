@@ -459,10 +459,21 @@ class Order {
     try {
       await client.query("BEGIN");
 
+      // finalized_at = fecha REAL de cierre, base del tiempo de ciclo del
+      // dashboard/informe (Fase 13). No se usa updated_at porque esa se pisa en
+      // cualquier edicion posterior (recalcCostEstimate, etc.).
+      //   - al entrar en 'finalizado': se sella, pero solo si estaba en NULL,
+      //     para que re-finalizar una orden ya cerrada no corra la fecha.
+      //   - al salir de 'finalizado' (reapertura): vuelve a NULL, porque la
+      //     orden dejo de estar cerrada y no debe contar como ciclo cumplido.
       const result = await client.query(
         `UPDATE orders_controls
          SET status = $1,
              notes  = COALESCE($2, notes),
+             finalized_at = CASE
+               WHEN $1 = 'finalizado' THEN COALESCE(finalized_at, NOW())
+               ELSE NULL
+             END,
              updated_at = NOW()
          WHERE id = $3
          RETURNING *`,

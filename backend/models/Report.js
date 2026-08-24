@@ -51,7 +51,7 @@ class Report {
     const params = branchId ? [branchId] : [];
 
     // Las consultas son independientes entre sí: se lanzan en paralelo para no
-    // pagar la latencia sumada de nueve viajes a la base.
+    // pagar la latencia sumada de doce viajes a la base.
     const [
       byBranch,
       muyPrioritarios,
@@ -60,6 +60,7 @@ class Report {
       supplierOrders,
       hubOrders,
       orderAge,
+      openOrderCounts,
       openSupplierOrders,
       hubCommitted,
       lastSync,
@@ -205,20 +206,38 @@ class Report {
         params
       ),
 
-      // 7) ANTIGÜEDAD PROMEDIO (días) de las órdenes EN GESTIÓN, por tipo. Una
-      //    orden cerrada o cancelada deja de contar.
+      // 7) TIEMPO DE CICLO promedio (días) de las órdenes CERRADAS, por tipo:
+      //    finalized_at - created_at sobre las finalizadas en los últimos 30
+      //    días. Misma definición y misma ventana que el dashboard (Alert.js),
+      //    a propósito: una sola métrica, un solo número. Reemplaza a la
+      //    antigüedad del backlog abierto que había antes.
+      //    Se informa también el MÁXIMO (la orden que más tardó en cerrarse) y
+      //    la cantidad de cierres, que es el tamaño de muestra del promedio.
+      //    'cancelado' queda afuera: no completó el ciclo.
       pool.query(
         `SELECT
-           ROUND(AVG(EXTRACT(EPOCH FROM (NOW() - oc.created_at)) / 86400)
+           ROUND(AVG(EXTRACT(EPOCH FROM (oc.finalized_at - oc.created_at)) / 86400)
                  FILTER (WHERE oc.order_type = 'external'))::int AS avg_days_supplier,
-           ROUND(AVG(EXTRACT(EPOCH FROM (NOW() - oc.created_at)) / 86400)
+           ROUND(AVG(EXTRACT(EPOCH FROM (oc.finalized_at - oc.created_at)) / 86400)
                  FILTER (WHERE oc.order_type = 'internal'))::int AS avg_days_hub,
-           MAX(EXTRACT(EPOCH FROM (NOW() - oc.created_at)) / 86400)
+           MAX(EXTRACT(EPOCH FROM (oc.finalized_at - oc.created_at)) / 86400)
                  FILTER (WHERE oc.order_type = 'external')::int  AS max_days_supplier,
-           MAX(EXTRACT(EPOCH FROM (NOW() - oc.created_at)) / 86400)
+           MAX(EXTRACT(EPOCH FROM (oc.finalized_at - oc.created_at)) / 86400)
                  FILTER (WHERE oc.order_type = 'internal')::int  AS max_days_hub,
-           COUNT(*) FILTER (WHERE oc.order_type = 'external')    AS open_supplier,
-           COUNT(*) FILTER (WHERE oc.order_type = 'internal')    AS open_hub
+           COUNT(*) FILTER (WHERE oc.order_type = 'external')    AS closed_supplier,
+           COUNT(*) FILTER (WHERE oc.order_type = 'internal')    AS closed_hub
+         FROM orders_controls oc
+         WHERE oc.status = 'finalizado'
+           AND oc.finalized_at >= NOW() - INTERVAL '30 days' ${ocBranch}`,
+        params
+      ),
+
+      // 7bis) Cantidad de órdenes ABIERTAS por tipo. Antes salía de la consulta
+      //    7, que ahora mide cierres; el summary sigue necesitando el pendiente.
+      pool.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE oc.order_type = 'external') AS open_supplier,
+           COUNT(*) FILTER (WHERE oc.order_type = 'internal') AS open_hub
          FROM orders_controls oc
          WHERE oc.status NOT IN ('finalizado', 'cancelado') ${ocBranch}`,
         params
@@ -304,6 +323,7 @@ class Report {
 
     const num = (v) => Number(v || 0);
     const age = orderAge.rows[0] || {};
+    const openCounts = openOrderCounts.rows[0] || {};
     const committed = hubCommitted.rows[0] || {};
 
     const supplierByStatus = byStatus(supplierOrders.rows, true);
@@ -335,8 +355,8 @@ class Report {
         discontinuedUnits: sum(discontinued.rows, "units"),
         discontinuedValue: sum(discontinued.rows, "value"),
         brandTrialsValue: sum(brandTrials.rows, "value"),
-        openOrdersSupplier: num(age.open_supplier),
-        openOrdersHub: num(age.open_hub),
+        openOrdersSupplier: num(openCounts.open_supplier),
+        openOrdersHub: num(openCounts.open_hub),
         supplierOrdersValue: supplierByStatus
           .filter((s) => !ORDER_STATUSES_TERMINAL.includes(s.status))
           .reduce((s, r) => s + r.value, 0),
@@ -381,15 +401,17 @@ class Report {
       supplierOrders: supplierByStatus,
       hubOrders: hubByStatus,
 
-      orderAge: {
+      // Tiempo de ciclo (últimos 30 días). closedSupplier/closedHub son el
+      // tamaño de muestra: en 0, el promedio viene null y el PDF muestra "—".
+      orderCycleTime: {
         avgDaysSupplier:
           age.avg_days_supplier != null ? num(age.avg_days_supplier) : null,
         avgDaysHub: age.avg_days_hub != null ? num(age.avg_days_hub) : null,
         maxDaysSupplier:
           age.max_days_supplier != null ? num(age.max_days_supplier) : null,
         maxDaysHub: age.max_days_hub != null ? num(age.max_days_hub) : null,
-        openSupplier: num(age.open_supplier),
-        openHub: num(age.open_hub),
+        closedSupplier: num(age.closed_supplier),
+        closedHub: num(age.closed_hub),
       },
 
       openSupplierOrders: openSupplierOrders.rows.map((r) => ({

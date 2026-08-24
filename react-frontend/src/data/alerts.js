@@ -22,10 +22,13 @@ export async function getAlerts() {
     pendingOrdersSupplier: Number(data.pendingOrdersSupplier || 0),
     pendingOrdersHub: Number(data.pendingOrdersHub || 0),
     authorizedOrders: Number(data.authorizedOrders || 0),
-    avgOrderAgeSupplierDays: data.avgOrderAgeSupplierDays != null ? Number(data.avgOrderAgeSupplierDays) : null,
-    avgOrderAgeHubDays: data.avgOrderAgeHubDays != null ? Number(data.avgOrderAgeHubDays) : null,
-    openOrdersSupplier: Number(data.openOrdersSupplier || 0),
-    openOrdersHub: Number(data.openOrdersHub || 0),
+    // Tiempo de ciclo de las órdenes cerradas en los últimos 30 días.
+    // closedOrders* es el tamaño de muestra: en 0 el promedio viene null y la
+    // tarjeta muestra "—" (no hubo cierres != cerramos en 0 días).
+    cycleTimeSupplierDays: data.cycleTimeSupplierDays != null ? Number(data.cycleTimeSupplierDays) : null,
+    cycleTimeHubDays: data.cycleTimeHubDays != null ? Number(data.cycleTimeHubDays) : null,
+    closedOrdersSupplier: Number(data.closedOrdersSupplier || 0),
+    closedOrdersHub: Number(data.closedOrdersHub || 0),
     avgCompliance: data.avgCompliance != null ? Number(data.avgCompliance) : null,
     brandTrialsDue: Number(data.brandTrialsDue || 0),
     discontinuedValue: (data.discontinuedValue || []).map((r) => ({

@@ -16,7 +16,7 @@ class Alert {
    * Considera controles ACTIVOS (draft + completed) e ítems no pedidos; los
    * 'discontinued' quedan fuera (están apagados a propósito).
    * @returns {Promise<object>} { muyPrioritarios, criticalBranches,
-   *   pendingOrders, authorizedOrders, avgOrderAgeDays, openOrdersTotal,
+   *   pendingOrders, authorizedOrders, cycleTime*Days, closedOrders*,
    *   avgCompliance, brandTrialsDue, discontinuedValue }
    */
   static async getSummary(branchId = null) {
@@ -93,18 +93,30 @@ class Alert {
       params
     );
 
-    // 3c) Antigüedad promedio (en días) de las órdenes EN GESTIÓN (no finalizadas
-    //     ni canceladas), separada por tipo (proveedor/Hub). Al cerrarse/cancelarse
-    //     una orden deja de contar. Se mide hoy - created_at sobre las abiertas.
-    const ageExpr = "EXTRACT(EPOCH FROM (NOW() - oc.created_at)) / 86400";
-    const avgOrderAge = await pool.query(
+    // 3c) TIEMPO DE CICLO promedio (en días) de las órdenes CERRADAS, separado
+    //     por tipo (proveedor/Hub). Mide finalized_at - created_at: cuánto
+    //     tardamos en cerrar una orden. Es una métrica de OPERATIVIDAD, no del
+    //     backlog: reemplaza a la antigüedad de órdenes abiertas que había antes
+    //     (esa era una foto del pendiente y se "reiniciaba" al cerrar todo, así
+    //     que no servía para hacer seguimiento en el tiempo).
+    //
+    //     Ventana MÓVIL de 30 días sobre la fecha de CIERRE, para poder evaluar
+    //     el mes en curso y compararlo con el anterior. El volumen mensual varía
+    //     mucho según la demanda, pero al ser un promedio POR ORDEN el volumen
+    //     no distorsiona (verificado en prod: jul 50 internas/6.3d vs ago 40/1.1d).
+    //
+    //     Solo 'finalizado': una orden 'cancelado' no completó el ciclo y su
+    //     demora no dice nada sobre la operatividad.
+    const cycleExpr = "EXTRACT(EPOCH FROM (oc.finalized_at - oc.created_at)) / 86400";
+    const cycleTime = await pool.query(
       `SELECT
-         ROUND(AVG(${ageExpr}) FILTER (WHERE oc.order_type = 'external'))::int AS avg_days_supplier,
-         ROUND(AVG(${ageExpr}) FILTER (WHERE oc.order_type = 'internal'))::int AS avg_days_hub,
-         COUNT(*) FILTER (WHERE oc.order_type = 'external')                     AS open_supplier,
-         COUNT(*) FILTER (WHERE oc.order_type = 'internal')                     AS open_hub
+         ROUND(AVG(${cycleExpr}) FILTER (WHERE oc.order_type = 'external'))::int AS cycle_days_supplier,
+         ROUND(AVG(${cycleExpr}) FILTER (WHERE oc.order_type = 'internal'))::int AS cycle_days_hub,
+         COUNT(*) FILTER (WHERE oc.order_type = 'external')                      AS closed_supplier,
+         COUNT(*) FILTER (WHERE oc.order_type = 'internal')                      AS closed_hub
        FROM orders_controls oc
-       WHERE oc.status NOT IN ('finalizado', 'cancelado') ${ordersBranchClause}`,
+       WHERE oc.status = 'finalizado'
+         AND oc.finalized_at >= NOW() - INTERVAL '30 days' ${ordersBranchClause}`,
       params
     );
 
@@ -169,7 +181,7 @@ class Alert {
     // 6) Marcas a prueba vencidas sin decidir (pendientes de evaluación).
     const brandTrialsDue = await BrandTrial.countDue(branchId);
 
-    const age = avgOrderAge.rows[0] || {};
+    const cycle = cycleTime.rows[0] || {};
     return {
       muyPrioritarios: muyPrioritarios.rows,
       criticalBranches: criticalBranches.rows,
@@ -178,11 +190,12 @@ class Alert {
       pendingOrdersSupplier: Number(pendingOrders.rows[0]?.supplier || 0),
       pendingOrdersHub: Number(pendingOrders.rows[0]?.hub || 0),
       authorizedOrders: Number(authorizedOrders.rows[0]?.total || 0),
-      // Antigüedad promedio por tipo (null si no hay órdenes abiertas de ese tipo).
-      avgOrderAgeSupplierDays: age.avg_days_supplier != null ? Number(age.avg_days_supplier) : null,
-      avgOrderAgeHubDays: age.avg_days_hub != null ? Number(age.avg_days_hub) : null,
-      openOrdersSupplier: Number(age.open_supplier || 0),
-      openOrdersHub: Number(age.open_hub || 0),
+      // Tiempo de ciclo promedio por tipo, últimos 30 días (null si no hubo
+      // cierres de ese tipo en la ventana: null y 0 no significan lo mismo).
+      cycleTimeSupplierDays: cycle.cycle_days_supplier != null ? Number(cycle.cycle_days_supplier) : null,
+      cycleTimeHubDays: cycle.cycle_days_hub != null ? Number(cycle.cycle_days_hub) : null,
+      closedOrdersSupplier: Number(cycle.closed_supplier || 0),
+      closedOrdersHub: Number(cycle.closed_hub || 0),
       avgCompliance: avgCompliance.rows[0]?.avg_compliance != null ? Number(avgCompliance.rows[0].avg_compliance) : null,
       brandTrialsDue,
       discontinuedValue: discontinuedValue.rows,

@@ -11,7 +11,7 @@ const numOrNull = (v) => (v != null ? Number(v) : null);
 export async function getSituation() {
   const d = await reportService.getSituation();
   const s = d.summary || {};
-  const age = d.orderAge || {};
+  const cycle = d.orderCycleTime || {};
   const hub = d.hubCommitted || {};
 
   return {
@@ -77,13 +77,15 @@ export async function getSituation() {
       orders: num(r.orders),
     })),
 
-    orderAge: {
-      avgDaysSupplier: numOrNull(age.avgDaysSupplier),
-      avgDaysHub: numOrNull(age.avgDaysHub),
-      maxDaysSupplier: numOrNull(age.maxDaysSupplier),
-      maxDaysHub: numOrNull(age.maxDaysHub),
-      openSupplier: num(age.openSupplier),
-      openHub: num(age.openHub),
+    // Tiempo de ciclo (finalized_at - created_at) de las órdenes cerradas en
+    // los últimos 30 días. closedSupplier/closedHub = tamaño de muestra.
+    orderCycleTime: {
+      avgDaysSupplier: numOrNull(cycle.avgDaysSupplier),
+      avgDaysHub: numOrNull(cycle.avgDaysHub),
+      maxDaysSupplier: numOrNull(cycle.maxDaysSupplier),
+      maxDaysHub: numOrNull(cycle.maxDaysHub),
+      closedSupplier: num(cycle.closedSupplier),
+      closedHub: num(cycle.closedHub),
     },
 
     openSupplierOrders: (d.openSupplierOrders || []).map((r) => ({

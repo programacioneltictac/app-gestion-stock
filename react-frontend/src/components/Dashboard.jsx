@@ -227,25 +227,30 @@ export default function Dashboard() {
               : 'warning'
           }
         />
+        {/* Tiempo de ciclo = cuanto tardamos en CERRAR una orden (finalized_at -
+            created_at), promedio de las finalizadas en los ultimos 30 dias.
+            Reemplaza a la antiguedad del backlog abierto, que no servia para
+            seguimiento porque se reiniciaba al cerrar las ordenes.
+            El '—' es "no hubo cierres en la ventana", que no es lo mismo que 0. */}
         <SummaryCard
           icon={<HourglassBottomIcon fontSize="large" />}
-          label="Antigüedad prom. órdenes (proveedor)"
+          label="Tiempo prom. ciclo órdenes (Proveedor)"
           value={
-            data?.openOrdersSupplier
-              ? `${data.avgOrderAgeSupplierDays} ${data.avgOrderAgeSupplierDays === 1 ? 'día' : 'días'}`
+            data?.closedOrdersSupplier
+              ? `${data.cycleTimeSupplierDays} ${data.cycleTimeSupplierDays === 1 ? 'día' : 'días'}`
               : '—'
           }
-          color={data?.avgOrderAgeSupplierDays != null && data.avgOrderAgeSupplierDays >= 7 ? 'warning' : 'info'}
+          color={data?.cycleTimeSupplierDays != null && data.cycleTimeSupplierDays >= 7 ? 'warning' : 'info'}
         />
         <SummaryCard
           icon={<HourglassBottomIcon fontSize="large" />}
-          label="Antigüedad prom. órdenes (Nodo Hub)"
+          label="Tiempo prom. ciclo órdenes (Nodo Hub)"
           value={
-            data?.openOrdersHub
-              ? `${data.avgOrderAgeHubDays} ${data.avgOrderAgeHubDays === 1 ? 'día' : 'días'}`
+            data?.closedOrdersHub
+              ? `${data.cycleTimeHubDays} ${data.cycleTimeHubDays === 1 ? 'día' : 'días'}`
               : '—'
           }
-          color={data?.avgOrderAgeHubDays != null && data.avgOrderAgeHubDays >= 7 ? 'warning' : 'info'}
+          color={data?.cycleTimeHubDays != null && data.cycleTimeHubDays >= 7 ? 'warning' : 'info'}
         />
         {(user?.role === 'admin' || user?.role === 'manager') && (
           <SummaryCard
