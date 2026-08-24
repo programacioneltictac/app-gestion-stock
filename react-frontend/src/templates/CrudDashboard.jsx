@@ -10,6 +10,7 @@ import BrandTrialList from "../components/BrandTrialList";
 import SettingsPage from "../components/SettingsPage";
 import StockControlList from "../components/StockControlList";
 import StockControlShow from "../components/StockControlShow";
+import QuickSearch from "../components/QuickSearch";
 import OrderList from "../components/OrderList";
 import OrderShow from "../components/OrderShow";
 import UsersList from "../components/UsersList";
@@ -48,6 +49,11 @@ const router = createHashRouter([
       {
         path: "/",
         Component: Dashboard,
+      },
+      // Buscador rapido: productos por proveedor/nombre agrupados por sucursal
+      {
+        path: "/search",
+        Component: QuickSearch,
       },
       // Stock Control routes
       {

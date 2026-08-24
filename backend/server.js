@@ -85,6 +85,10 @@ app.use("/api/settings", settingRoutes);
 const alertRoutes = require("./routes/alerts");
 app.use("/api/alerts", authenticateToken, alertRoutes);
 
+// Rutas del buscador rapido (productos por proveedor/nombre x sucursal)
+const searchRoutes = require("./routes/search");
+app.use("/api/search", authenticateToken, searchRoutes);
+
 // Rutas de informes (informe de situacion actual -> PDF en el frontend)
 const reportRoutes = require("./routes/reports");
 app.use("/api/reports", authenticateToken, reportRoutes);

@@ -9,6 +9,7 @@ import Divider from "@mui/material/Divider";
 import Toolbar from "@mui/material/Toolbar";
 
 import DashboardIcon from "@mui/icons-material/Dashboard";
+import SearchIcon from "@mui/icons-material/Search";
 import InventoryIcon from "@mui/icons-material/Inventory";
 import AssessmentIcon from "@mui/icons-material/Assessment";
 import StoreIcon from "@mui/icons-material/Store";
@@ -158,6 +159,13 @@ function DashboardSidebar({
               icon={<DashboardIcon />}
               href="/"
               selected={pathname === "/"}
+            />
+            <DashboardSidebarPageItem
+              id="search"
+              title="Busqueda rapida"
+              icon={<SearchIcon />}
+              href="/search"
+              selected={!!matchPath("/search/*", pathname)}
             />
             <DashboardSidebarPageItem
               id="orders"
