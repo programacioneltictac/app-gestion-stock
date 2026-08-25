@@ -92,6 +92,14 @@ function formatSyncDate(iso) {
   });
 }
 
+// Chips de estado del panel superior. El id es stock_status_id (1 generar
+// pedido, 2 optimo, 3 sobrestock) y statKey el campo del resumen que muestran.
+const STATUS_CHIPS = [
+  { id: 1, label: "En falta", color: "error", statKey: "needOrder" },
+  { id: 2, label: "Óptimo", color: "success", statKey: "optimal" },
+  { id: 3, label: "Sobrestock", color: "warning", statKey: "excess" },
+];
+
 export default function StockControlShow() {
   const { branchId, controlId } = useParams();
   const navigate = useNavigate();
@@ -136,10 +144,57 @@ export default function StockControlShow() {
   // También vive en la URL: al quitar el chip se limpia ?filter y al volver
   // desde otra pantalla el control reaparece con el mismo recorte.
   const filterFromUrl = searchParams.get("filter");
-  const filterMode =
-    filterFromUrl === "needorder" || filterFromUrl === "muyprioritario"
-      ? filterFromUrl
-      : null;
+  // "needorder" NO se trata como filterMode propio: se traduce a encender el
+  // chip "En falta", que hace exactamente lo mismo. Si convivieran los dos
+  // mecanismos, la tabla podria quedar filtrada por el banner con todos los
+  // chips apagados. "muyprioritario" si sigue aparte: es mas especifico
+  // (status 1 + condicion MUY PRIORITARIO + sin pedir) y ningun chip lo cubre.
+  const filterMode = filterFromUrl === "muyprioritario" ? filterFromUrl : null;
+
+  // Chips de estado del panel superior. Multi-seleccion: se pueden ver "En
+  // falta" y "Sobrestock" a la vez. Vacio = sin filtrar (chip "Total" activo).
+  const [statusFilter, setStatusFilter] = React.useState(() =>
+    filterFromUrl === "needorder" ? [1] : []
+  );
+  // Chip aparte para los faltantes reponibles todavia sin pedir: no es un
+  // estado, es un cruce (status 1 + reponible + sin orden).
+  const [unmanagedOnly, setUnmanagedOnly] = React.useState(false);
+
+  // Al tocar cualquier chip se limpia ?filter de la URL: si se llego desde el
+  // dashboard con "needorder", ese parametro ya cumplio su funcion (encender
+  // "En falta") y dejarlo haria que un refresh reviviera un filtro que el
+  // usuario acaba de cambiar a mano.
+  const dropFilterParam = React.useCallback(() => {
+    if (!searchParams.get("filter")) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("filter");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [searchParams, setSearchParams]);
+
+  const toggleStatusFilter = React.useCallback(
+    (statusId) => {
+      setStatusFilter((prev) =>
+        prev.includes(statusId) ? prev.filter((s) => s !== statusId) : [...prev, statusId]
+      );
+      // Los dos recortes son incompatibles: "Sin gestionar" ya implica status 1.
+      setUnmanagedOnly(false);
+      dropFilterParam();
+    },
+    [dropFilterParam]
+  );
+
+  const clearAllFilters = React.useCallback(() => {
+    setStatusFilter([]);
+    setUnmanagedOnly(false);
+    dropFilterParam();
+  }, [dropFilterParam]);
+
+  const noFiltersActive = statusFilter.length === 0 && !unmanagedOnly;
 
   const clearFilterMode = React.useCallback(() => {
     setSearchParams(
@@ -362,14 +417,9 @@ export default function StockControlShow() {
   }, [controlId, selectionModel, navigate, notifications, loadData]);
 
   // Ítems pedibles: estado generar_pedido (1) y aún no enviados a una orden.
-  const orderableIds = React.useMemo(
-    () => items.filter(isOrderable).map((i) => i.id),
-    [items]
-  );
-
-  const handleSelectAllOrderable = React.useCallback(() => {
-    setSelectionModel(orderableIds);
-  }, [orderableIds]);
+  // Pendientes de pedir en TODO el control. Se usa para decidir si la barra de
+  // seleccion tiene sentido y para avisar cuando el filtro esconde pendientes.
+  const orderableIds = React.useMemo(() => items.filter(isOrderable).map((i) => i.id), [items]);
 
   const handleCompleteControl = React.useCallback(async () => {
     const confirmed = await dialogs.confirm(
@@ -621,6 +671,8 @@ export default function StockControlShow() {
   //  - "muyprioritario": faltantes MUY PRIORITARIOS aún sin pedir (mismo criterio
   //    que la tarjeta del dashboard: status 1 + condición 3 + ordered_at NULL).
   const visibleItems = React.useMemo(() => {
+    // El filtro de llegada del dashboard manda sobre los chips: es un recorte
+    // puntual y quitable, y su banner muestra el conteo.
     if (filterMode === "muyprioritario") {
       return items.filter(
         (i) =>
@@ -629,11 +681,41 @@ export default function StockControlShow() {
           !i.orderedAt
       );
     }
-    if (filterMode === "needorder") {
-      return items.filter((i) => i.stockStatusId === 1);
+    if (unmanagedOnly) {
+      return items.filter(
+        (i) =>
+          i.stockStatusId === 1 &&
+          i.conditionId !== NON_REPLENISHABLE_CONDITION_ID &&
+          !i.orderedAt
+      );
+    }
+    if (statusFilter.length) {
+      return items.filter((i) => statusFilter.includes(i.stockStatusId));
     }
     return items;
-  }, [items, filterMode]);
+  }, [items, filterMode, statusFilter, unmanagedOnly]);
+
+  // Pendientes de pedir ENTRE LOS VISIBLES. "Seleccionar todos" usa estos y no
+  // los del control entero: con los chips se filtra mucho mas seguido, y
+  // seleccionar items ocultos genera ordenes con cosas que no se ven en
+  // pantalla. La seleccion en si sigue siendo valida sobre `items` (el filtro
+  // es solo de visualizacion), esto acota que se autoselecciona.
+  const visibleOrderableIds = React.useMemo(
+    () => visibleItems.filter(isOrderable).map((i) => i.id),
+    [visibleItems]
+  );
+
+  const handleSelectAllOrderable = React.useCallback(() => {
+    setSelectionModel(visibleOrderableIds);
+  }, [visibleOrderableIds]);
+
+  // Items ya seleccionados que el filtro actual esconde. Si hay, se avisa: son
+  // items que entrarian en la orden sin estar a la vista.
+  const hiddenSelectedCount = React.useMemo(() => {
+    if (!selectionModel.length) return 0;
+    const visibleIds = new Set(visibleItems.map((i) => i.id));
+    return selectionModel.filter((id) => !visibleIds.has(id)).length;
+  }, [selectionModel, visibleItems]);
 
   const stats = React.useMemo(() => {
     const total = items.length;
@@ -737,13 +819,57 @@ export default function StockControlShow() {
             }
             size="small"
           />
-          <Typography variant="body2">Total: <strong>{stats.total}</strong></Typography>
-          <Typography variant="body2" color="error.main">En falta: <strong>{stats.needOrder}</strong></Typography>
-          <Typography variant="body2" color="success.main">Óptimo: <strong>{stats.optimal}</strong></Typography>
-          <Typography variant="body2" color="warning.main">Sobrestock: <strong>{stats.excess}</strong></Typography>
+          {/* Total / En falta / Óptimo / Sobrestock son chips que filtran la
+              tabla. Multi-seleccion entre los de estado; "Total" limpia todo.
+              Compliance y Última sync quedan como texto: son medidas, no
+              categorias por las que se pueda recortar el listado.
+              Con el filtro del dashboard activo se deshabilitan, porque ese
+              recorte manda sobre los chips (ver visibleItems). */}
+          <Chip
+            label={`Total: ${stats.total}`}
+            size="small"
+            clickable={!filterMode}
+            disabled={!!filterMode}
+            onClick={clearAllFilters}
+            color={noFiltersActive ? "primary" : "default"}
+            variant={noFiltersActive ? "filled" : "outlined"}
+          />
+          {STATUS_CHIPS.map(({ id, label, color, statKey }) => {
+            const isActive = statusFilter.includes(id);
+            return (
+              <Chip
+                key={id}
+                label={`${label}: ${stats[statKey]}`}
+                size="small"
+                clickable={!filterMode}
+                disabled={!!filterMode}
+                onClick={() => toggleStatusFilter(id)}
+                color={isActive ? color : "default"}
+                variant={isActive ? "filled" : "outlined"}
+                sx={isActive ? undefined : { color: `${color}.main`, borderColor: `${color}.main` }}
+              />
+            );
+          })}
           <Typography variant="body2">Compliance: <strong>{stats.avg.toFixed(1)}%</strong></Typography>
-          <Tooltip title="Faltantes reponibles todavía sin pedir (sin orden en gestión)">
-            <Typography variant="body2" color="warning.main">Sin gestionar: <strong>{stats.unmanaged}</strong></Typography>
+          <Tooltip title="Faltantes reponibles todavía sin pedir (sin orden en gestión). Es la cifra accionable: lo que falta llevar a una orden.">
+            <Chip
+              label={`Sin gestionar: ${stats.unmanaged}`}
+              size="small"
+              clickable={!filterMode}
+              disabled={!!filterMode}
+              onClick={() => {
+                setUnmanagedOnly((prev) => !prev);
+                setStatusFilter([]);
+                dropFilterParam();
+              }}
+              color={unmanagedOnly ? "warning" : "default"}
+              variant={unmanagedOnly ? "filled" : "outlined"}
+              sx={
+                unmanagedOnly
+                  ? undefined
+                  : { color: "warning.main", borderColor: "warning.main" }
+              }
+            />
           </Tooltip>
           {formatSyncDate(lastSyncAt) && (
             <Typography variant="body2" color="text.secondary" sx={{ ml: "auto" }}>
@@ -855,16 +981,16 @@ export default function StockControlShow() {
         </Stack>
       )}
 
-      {/* Filtro activo de llegada desde el dashboard. Chip quitable para volver
-          a ver todo el control. El texto refleja el modo. */}
+      {/* Filtro MUY PRIORITARIOS de llegada desde el dashboard. Chip quitable
+          para volver a ver todo el control. Mientras esta puesto manda sobre
+          los chips del panel, que quedan deshabilitados: es un recorte mas
+          especifico (status 1 + condicion + sin pedir) que ninguno de ellos
+          reproduce. El otro modo historico, "needorder", ya no llega hasta aca:
+          se traduce en encender el chip "En falta" (ver statusFilter). */}
       {filterMode && (
         <Box sx={{ mb: 1 }}>
           <Chip
-            label={
-              filterMode === "muyprioritario"
-                ? `Filtrando: MUY PRIORITARIOS en falta (${visibleItems.length})`
-                : `Filtrando: Generar Pedido (${visibleItems.length})`
-            }
+            label={`Filtrando: MUY PRIORITARIOS en falta (${visibleItems.length})`}
             color="error"
             variant="outlined"
             onDelete={clearFilterMode}
@@ -880,9 +1006,28 @@ export default function StockControlShow() {
               ? `${selectionModel.length} ítem(s) seleccionado(s) para pedir`
               : `${orderableIds.length} ítem(s) pendiente(s) de pedir`}
           </Typography>
-          <Button size="small" onClick={handleSelectAllOrderable}>
-            Seleccionar todos los pendientes
+          {/* Selecciona solo lo visible: con un filtro puesto, autoseleccionar
+              items ocultos arma ordenes con cosas que no estan en pantalla. El
+              texto dice cuantos son para que no haya sorpresa. */}
+          <Button
+            size="small"
+            onClick={handleSelectAllOrderable}
+            disabled={visibleOrderableIds.length === 0}
+          >
+            {noFiltersActive && !filterMode
+              ? "Seleccionar todos los pendientes"
+              : `Seleccionar los ${visibleOrderableIds.length} pendiente(s) visible(s)`}
           </Button>
+          {hiddenSelectedCount > 0 && (
+            <Tooltip title="Entrarían en la orden aunque el filtro no los muestre">
+              <Chip
+                label={`${hiddenSelectedCount} seleccionado(s) fuera del filtro`}
+                size="small"
+                color="warning"
+                variant="outlined"
+              />
+            </Tooltip>
+          )}
           {selectionModel.length > 0 && (
             <Button size="small" color="inherit" onClick={() => setSelectionModel([])}>
               Limpiar selección
