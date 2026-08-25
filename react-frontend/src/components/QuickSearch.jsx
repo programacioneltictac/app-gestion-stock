@@ -1,4 +1,5 @@
 import * as React from "react";
+import { alpha } from "@mui/material/styles";
 import Alert from "@mui/material/Alert";
 import Autocomplete from "@mui/material/Autocomplete";
 import Box from "@mui/material/Box";
@@ -82,9 +83,18 @@ const ELLIPSIS = {
 // deformar la grilla.
 const TABLE_MIN_WIDTH = 720;
 
+// Tope de productos por busqueda. Es un limite de usabilidad, no tecnico: el
+// listado agrupado por sucursal deja de leerse con muchos productos a la vez.
+// El backend lo valida tambien (el parametro viaja en la URL).
+const MAX_PRODUCTS = 5;
+
+// Separador de la lista de nombres en la URL. NO se usa coma: 64 productos de
+// la base tienen coma en el nombre y ninguno tiene "|".
+const NAMES_SEPARATOR = "|";
+
 // Parametros que identifican QUE se busca. Solo un cambio en estos re-consulta
 // al backend; los de filtro se aplican sobre lo que ya esta en memoria.
-const SEARCH_PARAM_KEYS = ["supplier", "product", "q"];
+const SEARCH_PARAM_KEYS = ["supplier", "product", "q", "names"];
 
 const formatDate = (value) => {
   if (!value) return "—";
@@ -105,6 +115,11 @@ export default function QuickSearch() {
   const [supplier, setSupplier] = React.useState(null);
   const [product, setProduct] = React.useState(null);
   const [productInput, setProductInput] = React.useState("");
+  // Productos elegidos de la lista, que se acumulan como chips. Son nombres
+  // EXACTOS: el texto libre (`product`/`productInput`) sigue existiendo para
+  // buscar un solo termino, pero no se acumula (un "SOL" suelto matchea 43
+  // productos, asi que el tope de 5 no acotaria nada).
+  const [selectedProducts, setSelectedProducts] = React.useState([]);
 
   const [results, setResults] = React.useState(null); // null = todavia no se busco
   const [isSearching, setIsSearching] = React.useState(false);
@@ -136,8 +151,8 @@ export default function QuickSearch() {
 
   // Ejecuta la busqueda. Los criterios viven en la URL, para que el "Volver"
   // del navegador y un refresh conserven el resultado (mismo patron que /orders).
-  const runSearch = React.useCallback(async ({ supplierId, productStockId, q }) => {
-    if (!supplierId && !productStockId && !q) {
+  const runSearch = React.useCallback(async ({ supplierId, productStockId, q, names }) => {
+    if (!supplierId && !productStockId && !q && !names?.length) {
       setError("Indicá al menos un producto o un proveedor para buscar.");
       setResults(null);
       return;
@@ -145,7 +160,7 @@ export default function QuickSearch() {
     setIsSearching(true);
     setError(null);
     try {
-      setResults(await searchStock({ supplierId, productStockId, q }));
+      setResults(await searchStock({ supplierId, productStockId, q, names }));
     } catch (e) {
       setError(e.message || "Error al buscar");
       setResults(null);
@@ -167,7 +182,9 @@ export default function QuickSearch() {
     const supplierId = searchParams.get("supplier");
     const productStockId = searchParams.get("product");
     const q = searchParams.get("q");
-    if (!supplierId && !productStockId && !q) {
+    const rawNames = searchParams.get("names");
+    const names = rawNames ? rawNames.split(NAMES_SEPARATOR).filter(Boolean) : [];
+    if (!supplierId && !productStockId && !q && !names.length) {
       setResults(null);
       return;
     }
@@ -176,6 +193,9 @@ export default function QuickSearch() {
       const found = supplierOptions.find((s) => String(s.id) === String(supplierId));
       if (found) setSupplier(found);
     }
+    // Los chips se reponen del nombre solo: alcanza para mostrarlos y para
+    // volver a buscar (la busqueda es por nombre, no por id).
+    setSelectedProducts(names);
     if (q && !productStockId) {
       setProduct(q);
       setProductInput(q);
@@ -184,6 +204,7 @@ export default function QuickSearch() {
       supplierId: supplierId ? Number(supplierId) : null,
       productStockId: productStockId ? Number(productStockId) : null,
       q: q || null,
+      names,
     });
   }, [searchParams, supplierOptions, runSearch]);
 
@@ -267,18 +288,46 @@ export default function QuickSearch() {
     setSearchParams(params);
   };
 
+  // Agrega un producto elegido de la lista a los chips. Se ignoran los
+  // repetidos y se corta en MAX_PRODUCTS.
+  const addProduct = (label) => {
+    const name = (label || "").trim();
+    if (!name) return;
+    setSelectedProducts((prev) => {
+      if (prev.includes(name) || prev.length >= MAX_PRODUCTS) return prev;
+      return [...prev, name];
+    });
+    // El input queda limpio y listo para el siguiente.
+    setProduct(null);
+    setProductInput("");
+  };
+
+  const removeProduct = (name) => {
+    setSelectedProducts((prev) => prev.filter((n) => n !== name));
+  };
+
+  const atProductLimit = selectedProducts.length >= MAX_PRODUCTS;
+
   const handleSearch = () => {
     const params = new URLSearchParams();
     const supplierId = supplier && typeof supplier === "object" ? supplier.id : null;
     if (supplierId) params.set("supplier", String(supplierId));
 
-    if (product && typeof product === "object") {
+    // Lo que quedo tipeado sin elegir de la lista tambien cuenta: si no, el
+    // usuario escribe algo, toca Buscar y no pasa nada.
+    const typed = (typeof product === "string" ? product : productInput).trim();
+
+    if (selectedProducts.length) {
+      // Seleccion multiple: manda los nombres exactos elegidos. Un texto libre
+      // suelto se ignora a proposito — mezclarlo con la seleccion daria un
+      // resultado que el usuario no pidio.
+      params.set("names", selectedProducts.join(NAMES_SEPARATOR));
+    } else if (product && typeof product === "object") {
       // Elegido del desplegable: se busca por NOMBRE, no por el id de la fila,
       // porque ese id es de UNA sucursal y aca interesan todas.
       params.set("q", product.label);
-    } else {
-      const typed = (typeof product === "string" ? product : productInput).trim();
-      if (typed) params.set("q", typed);
+    } else if (typed) {
+      params.set("q", typed);
     }
 
     if (!params.toString()) {
@@ -293,6 +342,7 @@ export default function QuickSearch() {
     setSupplier(null);
     setProduct(null);
     setProductInput("");
+    setSelectedProducts([]);
     setResults(null);
     setError(null);
     setSearchParams(new URLSearchParams());
@@ -305,21 +355,29 @@ export default function QuickSearch() {
       <Stack spacing={2}>
         {/* ============ ENCABEZADO / PANEL DE BUSQUEDA ============ */}
         <Paper sx={{ p: 2 }}>
-          <Stack
-            direction={{ xs: "column", md: "row" }}
-            spacing={2}
-            alignItems={{ xs: "stretch", md: "center" }}
-          >
+          <Stack spacing={1.5}>
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={2}
+              alignItems={{ xs: "stretch", md: "center" }}
+            >
             <Autocomplete
               freeSolo
               sx={{ flex: 1, minWidth: 220 }}
               options={productOptions}
               value={product}
-              onChange={(_, v) => setProduct(v)}
+              disabled={atProductLimit}
+              onChange={(_, v) => {
+                // Elegir de la lista suma un chip; tipear texto libre sigue
+                // siendo una busqueda de un solo termino (no se acumula).
+                if (v && typeof v === "object") addProduct(v.label);
+                else setProduct(v);
+              }}
               inputValue={productInput}
               onInputChange={(_, v) => setProductInput(v)}
               getOptionLabel={(o) => (typeof o === "string" ? o : o.label || "")}
               isOptionEqualToValue={(o, v) => o.id === v?.id}
+              getOptionDisabled={(o) => selectedProducts.includes(o.label)}
               loading={isLoadingProducts}
               filterOptions={(x) => x}
               onKeyDown={(e) => {
@@ -328,8 +386,18 @@ export default function QuickSearch() {
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  label="Producto"
-                  placeholder="Seleccionar o escribir…"
+                  label={
+                    selectedProducts.length
+                      ? `Producto (${selectedProducts.length} de ${MAX_PRODUCTS})`
+                      : "Producto"
+                  }
+                  placeholder={
+                    atProductLimit
+                      ? "Máximo alcanzado"
+                      : selectedProducts.length
+                        ? "Agregar otro…"
+                        : "Seleccionar o escribir…"
+                  }
                   size="small"
                   slotProps={{
                     input: {
@@ -379,6 +447,64 @@ export default function QuickSearch() {
                 Limpiar
               </Button>
             </Stack>
+            </Stack>
+
+            {/* Productos elegidos. Se listan debajo del panel para ver de un
+                vistazo por cuantos se esta buscando. El chip va en azul tenue:
+                se despega del fondo sin competir con los chips de estado del
+                panel de filtros, que usan los colores semanticos. El contador
+                del tope vive en el label del campo Producto, no aca. */}
+            {selectedProducts.length > 0 && (
+              <Stack
+                direction="row"
+                spacing={1}
+                alignItems="center"
+                sx={{ flexWrap: "wrap", rowGap: 1 }}
+              >
+                {selectedProducts.map((name) => (
+                  <Chip
+                    key={name}
+                    label={name}
+                    size="small"
+                    onDelete={() => removeProduct(name)}
+                    // El tema se aplica por CSS (cssVariables +
+                    // colorSchemeSelector), asi que `theme.palette.mode` NO
+                    // refleja el esquema activo dentro de sx: devuelve siempre
+                    // el mismo valor y la rama oscura nunca se aplicaba. El
+                    // modo se distingue con theme.applyStyles("dark", ...),
+                    // que es el patron que ya usa el resto del proyecto
+                    // (dataGrid.js, datePickers.js, Login.jsx).
+                    sx={(theme) => ({
+                      maxWidth: 320,
+                      // Claro: azul translucido sobre papel claro — se despega
+                      // bien y queda discreto.
+                      bgcolor: alpha(theme.palette.primary.main, 0.12),
+                      color: theme.palette.primary.dark,
+                      border: 1,
+                      borderColor: alpha(theme.palette.primary.main, 0.3),
+                      "& .MuiChip-deleteIcon": {
+                        color: alpha(theme.palette.primary.main, 0.7),
+                        "&:hover": { color: theme.palette.primary.main },
+                      },
+                      // Oscuro: azul SOLIDO. Sobre el panel gris (gray[800])
+                      // cualquier azul translucido se funde con el fondo —
+                      // subir el alpha no alcanzaba (0.12 -> 0.35 solo movia la
+                      // separacion de 1.08 a 1.26). El solido la lleva a 2.11,
+                      // con texto blanco en 5.69.
+                      ...theme.applyStyles("dark", {
+                        bgcolor: theme.palette.primary.main,
+                        color: "#fff",
+                        borderColor: theme.palette.primary.main,
+                        "& .MuiChip-deleteIcon": {
+                          color: alpha("#fff", 0.8),
+                          "&:hover": { color: "#fff" },
+                        },
+                      }),
+                    })}
+                  />
+                ))}
+              </Stack>
+            )}
           </Stack>
         </Paper>
 

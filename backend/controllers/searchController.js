@@ -17,17 +17,35 @@ const parseIntParam = (value) => {
   return Number.isNaN(n) ? null : n;
 };
 
-// GET /api/search/stock?supplier_id=&product_stock_id=&q=
+// Tope de productos por busqueda. El limite tambien se valida aca y no solo en
+// la UI: el parametro viaja en la query string y se puede editar a mano.
+const MAX_PRODUCT_NAMES = 5;
+
+// GET /api/search/stock?supplier_id=&product_stock_id=&q=&names=
 // Filas producto x sucursal. Los filtros se combinan con AND.
+// `names` es una lista separada por "|" (no por coma: los nombres de producto
+// pueden contener comas).
 const searchStock = async (req, res) => {
   try {
     const supplierId = parseIntParam(req.query.supplier_id);
     const productStockId = parseIntParam(req.query.product_stock_id);
     const q = (req.query.q || "").trim() || null;
 
+    const names = (req.query.names || "")
+      .split("|")
+      .map((n) => n.trim())
+      .filter(Boolean);
+
+    if (names.length > MAX_PRODUCT_NAMES) {
+      return res.status(400).json({
+        status: "error",
+        message: `Se pueden buscar hasta ${MAX_PRODUCT_NAMES} productos a la vez`,
+      });
+    }
+
     // Sin ningun criterio la consulta barreria toda la base: se exige al menos
     // uno y el frontend muestra el estado "elegi un producto o proveedor".
-    if (!supplierId && !productStockId && !q) {
+    if (!supplierId && !productStockId && !q && !names.length) {
       return res.status(400).json({
         status: "error",
         message: "Indica al menos un producto o un proveedor para buscar",
@@ -35,7 +53,7 @@ const searchStock = async (req, res) => {
     }
 
     const branchIds = await getVisibleBranchIds(req.user);
-    const rows = await Search.findStock({ supplierId, productStockId, q, branchIds });
+    const rows = await Search.findStock({ supplierId, productStockId, q, names, branchIds });
 
     // Se pidio MAX_ROWS + 1: si vino de mas, hay resultados sin mostrar.
     const truncated = rows.length > Search.MAX_ROWS;

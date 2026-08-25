@@ -22,10 +22,27 @@ class Search {
    * @param {number?}  filters.supplierId      proveedor exacto (del desplegable)
    * @param {number?}  filters.productStockId  producto exacto (del desplegable)
    * @param {string?}  filters.q               texto libre sobre el nombre
+   * @param {string[]} filters.names           nombres EXACTOS (seleccion multiple)
    * @param {number[]} filters.branchIds       sucursales permitidas por rol
+   *
+   * `names` y `q` son excluyentes por naturaleza: el primero viene de elegir
+   * productos de la lista (coincidencia exacta) y el segundo de tipear. Si
+   * llegan los dos, manda `names` — es la seleccion explicita del usuario.
    */
-  static async findStock({ supplierId = null, productStockId = null, q = null, branchIds = [] }) {
+  static async findStock({
+    supplierId = null,
+    productStockId = null,
+    q = null,
+    names = [],
+    branchIds = [],
+  }) {
     if (!branchIds.length) return [];
+
+    // Seleccion multiple: se buscan los nombres EXACTOS elegidos, no un ILIKE.
+    // Es a proposito — un texto libre como "SOL" matchea 43 productos, asi que
+    // permitir varios terminos libres haria que el tope de 5 no acotara nada.
+    const exactNames = Array.isArray(names) ? names.filter(Boolean) : [];
+    const useNames = exactNames.length > 0;
 
     // El "estado" y la "condicion" no son propiedades del producto: viven en
     // stock_controls, que es por sucursal + rubro. Por eso se elige EL control
@@ -89,9 +106,10 @@ class Search {
           AND ($2::int  IS NULL OR sup.id = $2)
           AND ($3::int  IS NULL OR psb.id = $3)
           AND ($4::text IS NULL OR psb.display_name ILIKE '%' || $4 || '%')
+          AND ($5::text[] IS NULL OR psb.display_name = ANY($5::text[]))
         ORDER BY b.is_hub DESC, b.name, psb.display_name
         LIMIT ${MAX_ROWS + 1}`,
-      [branchIds, supplierId, productStockId, q]
+      [branchIds, supplierId, productStockId, useNames ? null : q, useNames ? exactNames : null]
     );
     return result.rows;
   }

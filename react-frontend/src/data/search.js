@@ -65,8 +65,8 @@ export function groupByBranch(rows) {
 // porque los filtros de la pantalla trabajan sobre ellas y reagrupan en el
 // cliente: los volumenes son chicos (un proveedor grande son ~60 filas) y asi
 // filtrar es instantaneo, sin volver al servidor.
-export async function searchStock({ supplierId, productStockId, q } = {}) {
-  const data = await searchService.searchStock({ supplierId, productStockId, q });
+export async function searchStock({ supplierId, productStockId, q, names } = {}) {
+  const data = await searchService.searchStock({ supplierId, productStockId, q, names });
   const rows = (data.results || []).map(transformResultRow);
 
   return {
