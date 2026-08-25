@@ -159,6 +159,9 @@ export default function StockControlShow() {
   // Chip aparte para los faltantes reponibles todavia sin pedir: no es un
   // estado, es un cruce (status 1 + reponible + sin orden).
   const [unmanagedOnly, setUnmanagedOnly] = React.useState(false);
+  // Chips de condicion. Se cruzan con los de estado (AND): "En falta" +
+  // "MUY PRIORITARIO" muestra los faltantes muy prioritarios.
+  const [conditionFilter, setConditionFilter] = React.useState([]);
 
   // Al tocar cualquier chip se limpia ?filter de la URL: si se llego desde el
   // dashboard con "needorder", ese parametro ya cumplio su funcion (encender
@@ -188,13 +191,26 @@ export default function StockControlShow() {
     [dropFilterParam]
   );
 
+  const toggleConditionFilter = React.useCallback(
+    (conditionId) => {
+      setConditionFilter((prev) =>
+        prev.includes(conditionId) ? prev.filter((c) => c !== conditionId) : [...prev, conditionId]
+      );
+      setUnmanagedOnly(false);
+      dropFilterParam();
+    },
+    [dropFilterParam]
+  );
+
   const clearAllFilters = React.useCallback(() => {
     setStatusFilter([]);
+    setConditionFilter([]);
     setUnmanagedOnly(false);
     dropFilterParam();
   }, [dropFilterParam]);
 
-  const noFiltersActive = statusFilter.length === 0 && !unmanagedOnly;
+  const noFiltersActive =
+    statusFilter.length === 0 && conditionFilter.length === 0 && !unmanagedOnly;
 
   const clearFilterMode = React.useCallback(() => {
     setSearchParams(
@@ -689,11 +705,33 @@ export default function StockControlShow() {
           !i.orderedAt
       );
     }
-    if (statusFilter.length) {
-      return items.filter((i) => statusFilter.includes(i.stockStatusId));
-    }
-    return items;
-  }, [items, filterMode, statusFilter, unmanagedOnly]);
+    // Estado y condicion se cruzan con AND: "En falta" + "MUY PRIORITARIO"
+    // deja los faltantes muy prioritarios. Un grupo sin chips no filtra.
+    return items.filter(
+      (i) =>
+        (statusFilter.length === 0 || statusFilter.includes(i.stockStatusId)) &&
+        (conditionFilter.length === 0 || conditionFilter.includes(i.conditionId))
+    );
+  }, [items, filterMode, statusFilter, conditionFilter, unmanagedOnly]);
+
+  // Condiciones presentes en ESTE control, con su conteo. Se poblan dinamicamente
+  // y no desde la tabla `conditions`: existen 4 condiciones pero ningun control
+  // usa mas de 2 (medido: 20 de 21 controles usan 2, uno usa 1), asi que las
+  // fijas dejarian siempre chips en cero que ademas vacian la tabla al tocarlos.
+  const conditionOptions = React.useMemo(() => {
+    const counts = new Map();
+    items.forEach((i) => {
+      if (!i.conditionId) return;
+      const prev = counts.get(i.conditionId);
+      counts.set(i.conditionId, {
+        id: i.conditionId,
+        name: i.conditionName || `Condición ${i.conditionId}`,
+        count: (prev?.count || 0) + 1,
+      });
+    });
+    // Orden por id: ESTANDAR, PRIORITARIO, MUY PRIORITARIO, NUEVA MARCA.
+    return [...counts.values()].sort((a, b) => a.id - b.id);
+  }, [items]);
 
   // Pendientes de pedir ENTRE LOS VISIBLES. "Seleccionar todos" usa estos y no
   // los del control entero: con los chips se filtra mucho mas seguido, y
@@ -871,6 +909,27 @@ export default function StockControlShow() {
               }
             />
           </Tooltip>
+          {/* Chips de condicion. Se cruzan con los de estado (AND) y van en
+              gris para que se lean como otro grupo: los de estado usan los
+              colores semanticos (rojo/verde/amarillo) y repetirlos aca haria
+              parecer que son lo mismo. Solo aparecen si hay mas de una
+              condicion: con una sola el chip no discrimina nada. */}
+          {conditionOptions.length > 1 &&
+            conditionOptions.map(({ id, name, count }) => {
+              const isActive = conditionFilter.includes(id);
+              return (
+                <Chip
+                  key={`cond-${id}`}
+                  label={`${name}: ${count}`}
+                  size="small"
+                  clickable={!filterMode}
+                  disabled={!!filterMode}
+                  onClick={() => toggleConditionFilter(id)}
+                  color={isActive ? "info" : "default"}
+                  variant={isActive ? "filled" : "outlined"}
+                />
+              );
+            })}
           {formatSyncDate(lastSyncAt) && (
             <Typography variant="body2" color="text.secondary" sx={{ ml: "auto" }}>
               Última sync: <strong>{formatSyncDate(lastSyncAt)}</strong>
