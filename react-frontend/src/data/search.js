@@ -28,12 +28,16 @@ function transformResultRow(r) {
   };
 }
 
-// Resultados ya agrupados por sucursal, en el orden que devuelve el backend
-// (Hub primero, despues alfabetico), con totales por sucursal para el encabezado.
-export async function searchStock({ supplierId, productStockId, q } = {}) {
-  const data = await searchService.searchStock({ supplierId, productStockId, q });
-  const rows = (data.results || []).map(transformResultRow);
-
+// Agrupa filas planas por sucursal, respetando el orden en que vienen del
+// backend (Hub primero, despues alfabetico), y calcula los totales del
+// encabezado.
+//
+// Es una funcion pura y se exporta a proposito: los filtros de la pantalla la
+// vuelven a llamar sobre el subconjunto filtrado, y asi los totales por
+// sucursal ("X items - Y u.", "N a pedir") quedan siempre referidos a lo que
+// se esta viendo, sin recalcularlos por separado. Una sucursal que se queda
+// sin filas simplemente no genera grupo -> desaparece del listado.
+export function groupByBranch(rows) {
   const branches = [];
   const byId = new Map();
   rows.forEach((row) => {
@@ -54,8 +58,23 @@ export async function searchStock({ supplierId, productStockId, q } = {}) {
     group.totalUnits += row.stock;
     if (row.stockStatusId === 1) group.needOrderCount += 1;
   });
+  return branches;
+}
 
-  return { branches, totalItems: rows.length, truncated: data.truncated === true };
+// Resultados agrupados por sucursal. Devuelve TAMBIEN las filas planas (`rows`)
+// porque los filtros de la pantalla trabajan sobre ellas y reagrupan en el
+// cliente: los volumenes son chicos (un proveedor grande son ~60 filas) y asi
+// filtrar es instantaneo, sin volver al servidor.
+export async function searchStock({ supplierId, productStockId, q } = {}) {
+  const data = await searchService.searchStock({ supplierId, productStockId, q });
+  const rows = (data.results || []).map(transformResultRow);
+
+  return {
+    rows,
+    branches: groupByBranch(rows),
+    totalItems: rows.length,
+    truncated: data.truncated === true,
+  };
 }
 
 export async function getProductOptions(q) {
