@@ -181,11 +181,16 @@ export default function StockControlShow() {
 
   const toggleStatusFilter = React.useCallback(
     (statusId) => {
-      setStatusFilter((prev) =>
-        prev.includes(statusId) ? prev.filter((s) => s !== statusId) : [...prev, statusId]
-      );
-      // Los dos recortes son incompatibles: "Sin gestionar" ya implica status 1.
-      setUnmanagedOnly(false);
+      setStatusFilter((prev) => {
+        const next = prev.includes(statusId)
+          ? prev.filter((s) => s !== statusId)
+          : [...prev, statusId];
+        // "Sin gestionar" ya implica "En falta". Cruzarlo con Optimo o
+        // Sobrestock daria siempre 0 filas, asi que al elegir un estado que no
+        // sea el 1 se apaga, en vez de dejar la tabla vacia sin explicacion.
+        if (next.some((sid) => sid !== 1)) setUnmanagedOnly(false);
+        return next;
+      });
       dropFilterParam();
     },
     [dropFilterParam]
@@ -196,7 +201,8 @@ export default function StockControlShow() {
       setConditionFilter((prev) =>
         prev.includes(conditionId) ? prev.filter((c) => c !== conditionId) : [...prev, conditionId]
       );
-      setUnmanagedOnly(false);
+      // No apaga "Sin gestionar": condicion y sin-gestionar se cruzan sin
+      // contradecirse ("los PRIORITARIOS que faltan por pedir").
       dropFilterParam();
     },
     [dropFilterParam]
@@ -697,20 +703,19 @@ export default function StockControlShow() {
           !i.orderedAt
       );
     }
-    if (unmanagedOnly) {
-      return items.filter(
-        (i) =>
-          i.stockStatusId === 1 &&
-          i.conditionId !== NON_REPLENISHABLE_CONDITION_ID &&
-          !i.orderedAt
-      );
-    }
-    // Estado y condicion se cruzan con AND: "En falta" + "MUY PRIORITARIO"
-    // deja los faltantes muy prioritarios. Un grupo sin chips no filtra.
+    // Los tres criterios se cruzan con AND y ninguno corta antes que los otros:
+    // "Sin gestionar" es un criterio mas, no un modo aparte. Cuando cortaba
+    // (return propio) ignoraba la condicion elegida y mostraba items que el
+    // chip encendido decia estar excluyendo.
+    // Un grupo sin chips no filtra.
     return items.filter(
       (i) =>
         (statusFilter.length === 0 || statusFilter.includes(i.stockStatusId)) &&
-        (conditionFilter.length === 0 || conditionFilter.includes(i.conditionId))
+        (conditionFilter.length === 0 || conditionFilter.includes(i.conditionId)) &&
+        (!unmanagedOnly ||
+          (i.stockStatusId === 1 &&
+            i.conditionId !== NON_REPLENISHABLE_CONDITION_ID &&
+            !i.orderedAt))
     );
   }, [items, filterMode, statusFilter, conditionFilter, unmanagedOnly]);
 
@@ -896,8 +901,12 @@ export default function StockControlShow() {
               clickable={!filterMode}
               disabled={!!filterMode}
               onClick={() => {
-                setUnmanagedOnly((prev) => !prev);
-                setStatusFilter([]);
+                setUnmanagedOnly((prev) => {
+                  // Al encenderlo se sueltan los estados que lo contradicen
+                  // (ya implica "En falta"); la condicion elegida se respeta.
+                  if (!prev) setStatusFilter((sf) => sf.filter((sid) => sid === 1));
+                  return !prev;
+                });
                 dropFilterParam();
               }}
               color={unmanagedOnly ? "warning" : "default"}
@@ -1099,6 +1108,22 @@ export default function StockControlShow() {
         <Alert severity="error">{error.message}</Alert>
       ) : (
         <Box sx={{ flex: 1, width: "100%" }}>
+          {/* Los filtros pueden dejar la tabla vacia con chips encendidos (ej.
+              una condicion sin faltantes por gestionar). Sin aviso parece que
+              el control no tiene items o que algo fallo. */}
+          {items.length > 0 && visibleItems.length === 0 && !filterMode && (
+            <Alert
+              severity="info"
+              sx={{ mb: 1 }}
+              action={
+                <Button color="inherit" size="small" onClick={clearAllFilters}>
+                  Limpiar filtros
+                </Button>
+              }
+            >
+              Ningún ítem de los {items.length} del control coincide con los filtros elegidos.
+            </Alert>
+          )}
           <DataGrid
             rows={visibleItems}
             columns={columns}
