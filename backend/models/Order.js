@@ -466,18 +466,23 @@ class Order {
       //     para que re-finalizar una orden ya cerrada no corra la fecha.
       //   - al salir de 'finalizado' (reapertura): vuelve a NULL, porque la
       //     orden dejo de estar cerrada y no debe contar como ciclo cumplido.
+      // Ojo: el estado va como $1 y $4 (dos parametros con el MISMO valor) a
+      // proposito. Reusar $1 dentro del CASE rompe con "inconsistent types
+      // deduced for parameter $1": el SET lo deduce como varchar (tipo de la
+      // columna) y la comparacion contra el literal como text, y Postgres no
+      // acepta dos deducciones distintas para un mismo parametro.
       const result = await client.query(
         `UPDATE orders_controls
          SET status = $1,
              notes  = COALESCE($2, notes),
              finalized_at = CASE
-               WHEN $1 = 'finalizado' THEN COALESCE(finalized_at, NOW())
+               WHEN $4::text = 'finalizado' THEN COALESCE(finalized_at, NOW())
                ELSE NULL
              END,
              updated_at = NOW()
          WHERE id = $3
          RETURNING *`,
-        [status, notes, id]
+        [status, notes, id, status]
       );
       const order = result.rows[0] || null;
 
