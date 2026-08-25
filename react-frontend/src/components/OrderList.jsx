@@ -69,6 +69,10 @@ export default function OrderList() {
   );
 
   const isEmployee = user?.role === 'employee';
+  // Eliminar ordenes es solo de admin: es destructivo e irreversible. El
+  // manager sigue gestionando el ciclo de vida (estado, recepcion). Esto solo
+  // oculta la accion — quien restringe es requireRole en backend/routes/orders.js.
+  const isAdmin = user?.role === 'admin';
   // Las ordenes externas (proveedor) las gestiona compras: solo admin/manager.
   // El empleado solo ve el tab interno (Hub).
   // La pestaña activa vive en la URL (?tab=internal|external) para que al volver
@@ -319,7 +323,7 @@ export default function OrderList() {
             label="Ver detalle"
             onClick={handleRowView(row)}
           />,
-          ...(!isEmployee ? [
+          ...(isAdmin ? [
             <GridActionsCellItem
               key="delete"
               icon={<DeleteIcon />}
@@ -330,7 +334,7 @@ export default function OrderList() {
         ],
       },
     ],
-    [handleRowView, handleRowDelete, isEmployee, activeTab]
+    [handleRowView, handleRowDelete, isAdmin, activeTab]
   );
 
   return (

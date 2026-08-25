@@ -39,6 +39,10 @@ export default function StockControlList() {
   const dialogs = useDialogs();
   const notifications = useNotifications();
   const { hasRole } = useAuth();
+  // Crear, borrar y editar controles es de admin. El manager consulta.
+  // Ojo: esto solo oculta la UI — quien restringe de verdad es requireRole en
+  // backend/routes/stock.js.
+  const isAdmin = hasRole("admin");
 
   const [controls, setControls] = React.useState([]);
   const [branch, setBranch] = React.useState(null);
@@ -243,17 +247,23 @@ export default function StockControlList() {
             label="Ver"
             onClick={handleRowView(row)}
           />,
-          <GridActionsCellItem
-            key="delete-item"
-            icon={<DeleteIcon />}
-            label="Eliminar"
-            onClick={handleRowDelete(row)}
-            disabled={row.status === "completed" && !hasRole("admin")}
-          />,
+          // Borrar control: solo admin. Antes se deshabilitaba unicamente en
+          // los completados, asi que a un manager le aparecia activo en los
+          // borradores y el backend se lo rechazaba al tocarlo.
+          ...(isAdmin
+            ? [
+                <GridActionsCellItem
+                  key="delete-item"
+                  icon={<DeleteIcon />}
+                  label="Eliminar"
+                  onClick={handleRowDelete(row)}
+                />,
+              ]
+            : []),
         ],
       },
     ],
-    [handleRowView, handleRowDelete, getStatusColor, hasRole]
+    [handleRowView, handleRowDelete, getStatusColor, isAdmin]
   );
 
   const pageTitle = branch
@@ -272,14 +282,16 @@ export default function StockControlList() {
           <ActionButton icon={<RefreshIcon />} onClick={handleRefresh}>
             Actualizar
           </ActionButton>
-          <ActionButton
-            variant="primary"
-            icon={<AddIcon />}
-            onClick={handleOpenCreate}
-            disabled={!branch}
-          >
-            Crear
-          </ActionButton>
+          {isAdmin && (
+            <ActionButton
+              variant="primary"
+              icon={<AddIcon />}
+              onClick={handleOpenCreate}
+              disabled={!branch}
+            >
+              Crear
+            </ActionButton>
+          )}
         </Stack>
       }
     >

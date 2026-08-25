@@ -107,6 +107,10 @@ export default function StockControlShow() {
   const dialogs = useDialogs();
   const notifications = useNotifications();
   const { user } = useAuth();
+  // Crear/cerrar/discontinuar controles, editar sus items y generar ordenes son
+  // acciones de admin. El manager consulta el control y gestiona las ordenes ya
+  // creadas. Esto solo oculta la UI: quien restringe es requireRole en
+  // backend/routes/stock.js y orders.js.
   const isAdmin = user?.role === "admin";
 
   const [control, setControl] = React.useState(null);
@@ -623,7 +627,9 @@ export default function StockControlShow() {
         headerName: "",
         width: 90,
         getActions: ({ row }) => {
-          if (control?.status !== "draft") return [];
+          // Editar/borrar items del control es de admin: cargar items no es
+          // funcion del manager (backend/routes/stock.js lo exige).
+          if (control?.status !== "draft" || !isAdmin) return [];
           // Los ítems ya pedidos (ordered_at) no se editan: su cantidad ya
           // viajó a una orden. Para cambiarlos hay que eliminar el ítem (lo
           // que reabre el pedido) y volver a cargarlo.
@@ -646,7 +652,7 @@ export default function StockControlShow() {
         },
       },
     ],
-    [control, handleDeleteItem, handleEditItem]
+    [control, handleDeleteItem, handleEditItem, isAdmin]
   );
 
   // Columnas de la tabla de discontinuos (solo lectura): Producto, Rubro,
@@ -806,7 +812,7 @@ export default function StockControlShow() {
               Descargar Excel
             </ActionButton>
           )}
-          {control?.status === "draft" && (
+          {control?.status === "draft" && isAdmin && (
             <ActionButton
               variant="primary"
               color="success"
@@ -825,7 +831,7 @@ export default function StockControlShow() {
               Reabrir para editar
             </ActionButton>
           )}
-          {control?.status === "completed" && (
+          {control?.status === "completed" && isAdmin && (
             <ActionButton
               variant="secondary"
               icon={<ArchiveIcon />}
@@ -834,7 +840,7 @@ export default function StockControlShow() {
               Discontinuar
             </ActionButton>
           )}
-          {control && control.status !== "discontinued" && orderableIds.length > 0 && (
+          {control && control.status !== "discontinued" && orderableIds.length > 0 && isAdmin && (
             <ActionButton
               variant="primary"
               color="warning"
@@ -980,7 +986,7 @@ export default function StockControlShow() {
       ) : (
         <>
       {/* Inline add form — only visible in draft */}
-      {control?.status === "draft" && (
+      {control?.status === "draft" && isAdmin && (
         <Stack direction="row" spacing={1} sx={{ mb: 2 }} alignItems="center">
           <Autocomplete
             size="small"

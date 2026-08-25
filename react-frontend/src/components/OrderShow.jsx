@@ -83,7 +83,11 @@ export default function OrderShow() {
 
   const isEmployee = user?.role === 'employee';
   const canEditStatus = !isEmployee;
-  const canDelete = !isEmployee;
+  // Borrar (la orden entera o un item suelto) es solo de admin: es destructivo
+  // e irreversible, y vaciar una orden item por item logra lo mismo que
+  // borrarla. El manager conserva estado y recepcion. Esto solo oculta la UI —
+  // quien restringe es requireRole en backend/routes/orders.js.
+  const canDelete = user?.role === 'admin';
 
   // Las órdenes internas (Nodo Hub) usan "finalizar ítem" (marca de gestión) en
   // lugar de la recepción de mercadería. Cualquiera con acceso puede finalizar.

@@ -31,6 +31,7 @@ import { getBrands, getCategories } from "../data/catalogs";
 import { getBranchesList } from "../data/branches";
 import PageContainer from "./PageContainer";
 import ActionButton from "./ActionButton";
+import { useAuth } from "../context/AuthContext";
 
 const formatDate = (d) => (d ? new Date(d).toLocaleDateString("es-ES") : "");
 const formatCurrency = (v) =>
@@ -54,6 +55,13 @@ const emptyForm = {
 };
 
 export default function BrandTrialList() {
+  const { user } = useAuth();
+  // Alta y decision final (incorporar/descartar) de marcas a prueba: definen
+  // que entra al catalogo, asi que son de admin. El manager consulta el estado
+  // de las pruebas. Editar y borrar tambien: son vias para lo mismo.
+  // Esto solo oculta la UI — restringe requireRole en backend/routes/brandTrials.js.
+  const isAdmin = user?.role === "admin";
+
   const notifications = useNotifications();
   const dialogs = useDialogs();
   const [searchParams] = useSearchParams();
@@ -264,6 +272,7 @@ export default function BrandTrialList() {
         headerName: "",
         width: 150,
         getActions: ({ row }) => {
+          if (!isAdmin) return [];
           const inProgress = row.status === "en_prueba";
           return [
             ...(inProgress
@@ -278,7 +287,7 @@ export default function BrandTrialList() {
         },
       },
     ],
-    [handleDecide, openEdit, handleDelete]
+    [handleDecide, openEdit, handleDelete, isAdmin]
   );
 
   return (
@@ -287,9 +296,11 @@ export default function BrandTrialList() {
       breadcrumbs={[{ title: "Marcas a prueba" }]}
       actions={
         <Stack direction="row" spacing={1}>
-          <ActionButton variant="primary" icon={<AddIcon />} onClick={openCreate}>
+{isAdmin && (
+                      <ActionButton variant="primary" icon={<AddIcon />} onClick={openCreate}>
             Nueva prueba
           </ActionButton>
+          )}
           <ActionButton icon={<RefreshIcon />} onClick={() => !isLoading && loadData()} disabled={isLoading}>
             Actualizar
           </ActionButton>

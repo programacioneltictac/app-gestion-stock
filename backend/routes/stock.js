@@ -3,20 +3,27 @@ const router = express.Router();
 const stockController = require("../controllers/stockController");
 const branchController = require("../controllers/branchController");
 const catalogController = require("../controllers/catalogController");
+const { requireRole } = require("../middlewares/auth");
+
+// Acciones reservadas a admin. El manager consulta y opera sobre lo ya
+// armado, pero no crea/cierra controles ni edita sus items: cargar items no
+// es su funcion. La restriccion va EN LA RUTA y no solo en la UI porque
+// ocultar el boton no impide llamar al endpoint con la sesion abierta.
+const adminOnly = requireRole("admin");
 
 // ==================== MONTHLY CONTROLS ====================
 
 // POST /api/stock/monthly-control/create
-router.post("/monthly-control/create", stockController.createMonthlyControl);
+router.post("/monthly-control/create", adminOnly, stockController.createMonthlyControl);
 
 // GET /api/stock/monthly-control/current
 router.get("/monthly-control/current", stockController.getCurrentMonthlyControl);
 
 // PUT /api/stock/monthly-control/complete
-router.put("/monthly-control/complete", stockController.completeMonthlyControl);
+router.put("/monthly-control/complete", adminOnly, stockController.completeMonthlyControl);
 
 // PUT /api/stock/monthly-control/discontinue — discontinúa un control completado.
-router.put("/monthly-control/discontinue", stockController.discontinueMonthlyControl);
+router.put("/monthly-control/discontinue", adminOnly, stockController.discontinueMonthlyControl);
 
 // PUT /api/stock/monthly-control/reopen — reabre un control completado a draft (admin).
 router.put("/monthly-control/reopen", stockController.reopenMonthlyControl);
@@ -43,13 +50,13 @@ router.delete("/monthly-control/:control_id", stockController.deleteMonthlyContr
 // ==================== STOCK ITEMS ====================
 
 // POST /api/stock/items/upsert
-router.post("/items/upsert", stockController.upsertStockItem);
+router.post("/items/upsert", adminOnly, stockController.upsertStockItem);
 
 // GET /api/stock/items/:control_id
 router.get("/items/:control_id", stockController.getStockItems);
 
 // DELETE /api/stock/items/:item_id
-router.delete("/items/:item_id", stockController.deleteStockItem);
+router.delete("/items/:item_id", adminOnly, stockController.deleteStockItem);
 
 // ==================== AVAILABLE PRODUCTS ====================
 
