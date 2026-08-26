@@ -71,7 +71,8 @@ class StockControl {
    * Si llega product_stock_id, lo valida. Si en cambio llega product_id o
    * group_id (producto/grupo del catálogo global que aún no existe en esta
    * sucursal), crea/recupera su fila en product_stock_by_branch con stock=0
-   * y devuelve su id. La fila en 0 se reconcilia sola en la próxima sync
+   * y last_sync_at NULL (nunca se sincronizó), y devuelve su id. La fila en 0
+   * se reconcilia sola en la próxima sync
    * (UNIQUE(branch_id, product_id/group_id) + ON CONFLICT DO UPDATE del sync).
    * @returns {Promise<number>} product_stock_id resuelto.
    */
@@ -111,10 +112,15 @@ class StockControl {
     }
     const display_name = nameResult.rows[0].display_name;
 
+    // last_sync_at va NULL a propósito: esta fila la creamos nosotros en 0, no
+    // la trajo ningún sync. Con NOW() el cartel "Última sync" del control ―que
+    // es el MAX(last_sync_at) de sus ítems― saltaba a la hora del alta y hacía
+    // creer que había corrido un sync que nunca corrió. El sync la fecha cuando
+    // el producto aparezca con stock real (ON CONFLICT DO UPDATE de syncService).
     const psbResult = await client.query(
       `INSERT INTO product_stock_by_branch
          (branch_id, ${column}, stock, display_name, avg_cost, cost_item_count, last_sync_at)
-       VALUES ($1, $2, 0, $3, 0, 0, NOW())
+       VALUES ($1, $2, 0, $3, 0, 0, NULL)
        ON CONFLICT (branch_id, ${column}) DO UPDATE
          SET display_name = EXCLUDED.display_name
        RETURNING id`,
