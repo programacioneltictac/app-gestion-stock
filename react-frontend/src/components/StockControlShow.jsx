@@ -140,32 +140,38 @@ export default function StockControlShow() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") === "discontinued" ? "discontinued" : "control";
 
-  // Filtro de llegada desde el dashboard, quitable con un chip. Dos modos:
-  //  - "needorder": todos los ítems en "Generar Pedido" (status 1).
-  //  - "muyprioritario": solo los faltantes MUY PRIORITARIOS y aún sin pedir,
-  //    idéntico a lo que cuenta la tarjeta "Faltantes MUY PRIORITARIOS" del
-  //    dashboard, para que el número del control coincida con el de la tarjeta.
-  // También vive en la URL: al quitar el chip se limpia ?filter y al volver
+  // Filtro de llegada desde el dashboard. TODOS los modos se traducen a chips
+  // encendidos (ninguno es un modo aparte con banner), para que los accesos
+  // desde el dashboard se vean y se apaguen siempre igual:
+  //  - "needorder":      chip "En falta" (status 1).
+  //  - "overstock":      chip "Sobrestock" (status 3).
+  //  - "muyprioritario": "En falta" + condición MUY PRIORITARIO + "Sin gestionar",
+  //    que juntos reproducen exactamente lo que cuenta la tarjeta del dashboard
+  //    (status 1 + condición 3 + ordered_at NULL), para que el número del
+  //    control coincida con el de la tarjeta.
+  // El recorte vive en la URL: al apagar un chip se limpia ?filter y al volver
   // desde otra pantalla el control reaparece con el mismo recorte.
   const filterFromUrl = searchParams.get("filter");
-  // "needorder" NO se trata como filterMode propio: se traduce a encender el
-  // chip "En falta", que hace exactamente lo mismo. Si convivieran los dos
-  // mecanismos, la tabla podria quedar filtrada por el banner con todos los
-  // chips apagados. "muyprioritario" si sigue aparte: es mas especifico
-  // (status 1 + condicion MUY PRIORITARIO + sin pedir) y ningun chip lo cubre.
-  const filterMode = filterFromUrl === "muyprioritario" ? filterFromUrl : null;
 
   // Chips de estado del panel superior. Multi-seleccion: se pueden ver "En
   // falta" y "Sobrestock" a la vez. Vacio = sin filtrar (chip "Total" activo).
-  const [statusFilter, setStatusFilter] = React.useState(() =>
-    filterFromUrl === "needorder" ? [1] : []
-  );
+  const [statusFilter, setStatusFilter] = React.useState(() => {
+    // "muyprioritario" tambien parte de "En falta": los tres chips juntos
+    // (estado + condicion + sin gestionar) dan el mismo recorte que la tarjeta.
+    if (filterFromUrl === "needorder" || filterFromUrl === "muyprioritario") return [1];
+    if (filterFromUrl === "overstock") return [3];
+    return [];
+  });
   // Chip aparte para los faltantes reponibles todavia sin pedir: no es un
   // estado, es un cruce (status 1 + reponible + sin orden).
-  const [unmanagedOnly, setUnmanagedOnly] = React.useState(false);
+  const [unmanagedOnly, setUnmanagedOnly] = React.useState(
+    () => filterFromUrl === "muyprioritario"
+  );
   // Chips de condicion. Se cruzan con los de estado (AND): "En falta" +
   // "MUY PRIORITARIO" muestra los faltantes muy prioritarios.
-  const [conditionFilter, setConditionFilter] = React.useState([]);
+  const [conditionFilter, setConditionFilter] = React.useState(() =>
+    filterFromUrl === "muyprioritario" ? [MUY_PRIORITARIO_CONDITION_ID] : []
+  );
 
   // Al tocar cualquier chip se limpia ?filter de la URL: si se llego desde el
   // dashboard con "needorder", ese parametro ya cumplio su funcion (encender
@@ -222,16 +228,6 @@ export default function StockControlShow() {
   const noFiltersActive =
     statusFilter.length === 0 && conditionFilter.length === 0 && !unmanagedOnly;
 
-  const clearFilterMode = React.useCallback(() => {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("filter");
-        return next;
-      },
-      { replace: true }
-    );
-  }, [setSearchParams]);
   const [discontinued, setDiscontinued] = React.useState([]);
   const [discLoaded, setDiscLoaded] = React.useState(false);
   const [isLoadingDisc, setIsLoadingDisc] = React.useState(false);
@@ -695,20 +691,11 @@ export default function StockControlShow() {
   // Filas visibles en la tabla del control según el filtro de llegada. La
   // selección para órdenes sigue basada en `items` completo (isOrderable), así
   // que el filtro es solo de visualización.
-  //  - "needorder": todos los ítems en "Generar Pedido" (status 1).
-  //  - "muyprioritario": faltantes MUY PRIORITARIOS aún sin pedir (mismo criterio
-  //    que la tarjeta del dashboard: status 1 + condición 3 + ordered_at NULL).
+  // Los filtros de llegada del dashboard ya vienen traducidos a chips (ver
+  // statusFilter/conditionFilter/unmanagedOnly), asi que no hay un modo aparte:
+  // este cruce es el unico camino de filtrado y lo que se ve siempre coincide
+  // con los chips encendidos.
   const visibleItems = React.useMemo(() => {
-    // El filtro de llegada del dashboard manda sobre los chips: es un recorte
-    // puntual y quitable, y su banner muestra el conteo.
-    if (filterMode === "muyprioritario") {
-      return items.filter(
-        (i) =>
-          i.stockStatusId === 1 &&
-          i.conditionId === MUY_PRIORITARIO_CONDITION_ID &&
-          !i.orderedAt
-      );
-    }
     // Los tres criterios se cruzan con AND y ninguno corta antes que los otros:
     // "Sin gestionar" es un criterio mas, no un modo aparte. Cuando cortaba
     // (return propio) ignoraba la condicion elegida y mostraba items que el
@@ -723,7 +710,7 @@ export default function StockControlShow() {
             i.conditionId !== NON_REPLENISHABLE_CONDITION_ID &&
             !i.orderedAt))
     );
-  }, [items, filterMode, statusFilter, conditionFilter, unmanagedOnly]);
+  }, [items, statusFilter, conditionFilter, unmanagedOnly]);
 
   // Condiciones presentes en ESTE control, con su conteo. Se poblan dinamicamente
   // y no desde la tabla `conditions`: existen 4 condiciones pero ningun control
@@ -743,6 +730,19 @@ export default function StockControlShow() {
     // Orden por id: ESTANDAR, PRIORITARIO, MUY PRIORITARIO, NUEVA MARCA.
     return [...counts.values()].sort((a, b) => a.id - b.id);
   }, [items]);
+
+  // Red de seguridad del filtro de llegada: si se llego con
+  // ?filter=muyprioritario a un control que NO tiene ningun item de esa
+  // condicion, el chip no existe (se dibujan solo las condiciones presentes) y
+  // la tabla quedaria vacia sin nada que apagar. En ese caso se suelta la
+  // condicion y quedan los otros dos chips, que si estan a la vista.
+  React.useEffect(() => {
+    if (conditionOptions.length === 0) return; // items aun sin cargar
+    setConditionFilter((prev) => {
+      const next = prev.filter((id) => conditionOptions.some((o) => o.id === id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [conditionOptions]);
 
   // Pendientes de pedir ENTRE LOS VISIBLES. "Seleccionar todos" usa estos y no
   // los del control entero: con los chips se filtra mucho mas seguido, y
@@ -877,8 +877,6 @@ export default function StockControlShow() {
           <Chip
             label={`Total: ${stats.total}`}
             size="small"
-            clickable={!filterMode}
-            disabled={!!filterMode}
             onClick={clearAllFilters}
             color={noFiltersActive ? "primary" : "default"}
             variant={noFiltersActive ? "filled" : "outlined"}
@@ -890,8 +888,6 @@ export default function StockControlShow() {
                 key={id}
                 label={`${label}: ${stats[statKey]}`}
                 size="small"
-                clickable={!filterMode}
-                disabled={!!filterMode}
                 onClick={() => toggleStatusFilter(id)}
                 color={isActive ? color : "default"}
                 variant={isActive ? "filled" : "outlined"}
@@ -904,8 +900,6 @@ export default function StockControlShow() {
             <Chip
               label={`Sin gestionar: ${stats.unmanaged}`}
               size="small"
-              clickable={!filterMode}
-              disabled={!!filterMode}
               onClick={() => {
                 setUnmanagedOnly((prev) => {
                   // Al encenderlo se sueltan los estados que lo contradicen
@@ -928,8 +922,12 @@ export default function StockControlShow() {
               gris para que se lean como otro grupo: los de estado usan los
               colores semanticos (rojo/verde/amarillo) y repetirlos aca haria
               parecer que son lo mismo. Solo aparecen si hay mas de una
-              condicion: con una sola el chip no discrimina nada. */}
-          {conditionOptions.length > 1 &&
+              condicion: con una sola el chip no discrimina nada. Excepcion: si
+              esa unica condicion esta ACTIVA (se llego con ?filter=muyprioritario
+              a un control donde todo es MUY PRIORITARIO), el chip se muestra
+              igual; si no, la tabla quedaria filtrada por un chip invisible y
+              sin forma de apagarlo. */}
+          {(conditionOptions.length > 1 || conditionFilter.length > 0) &&
             conditionOptions.map(({ id, name, count }) => {
               const isActive = conditionFilter.includes(id);
               return (
@@ -937,8 +935,6 @@ export default function StockControlShow() {
                   key={`cond-${id}`}
                   label={`${name}: ${count}`}
                   size="small"
-                  clickable={!filterMode}
-                  disabled={!!filterMode}
                   onClick={() => toggleConditionFilter(id)}
                   color={isActive ? "info" : "default"}
                   variant={isActive ? "filled" : "outlined"}
@@ -1055,23 +1051,6 @@ export default function StockControlShow() {
         </Stack>
       )}
 
-      {/* Filtro MUY PRIORITARIOS de llegada desde el dashboard. Chip quitable
-          para volver a ver todo el control. Mientras esta puesto manda sobre
-          los chips del panel, que quedan deshabilitados: es un recorte mas
-          especifico (status 1 + condicion + sin pedir) que ninguno de ellos
-          reproduce. El otro modo historico, "needorder", ya no llega hasta aca:
-          se traduce en encender el chip "En falta" (ver statusFilter). */}
-      {filterMode && (
-        <Box sx={{ mb: 1 }}>
-          <Chip
-            label={`Filtrando: MUY PRIORITARIOS en falta (${visibleItems.length})`}
-            color="error"
-            variant="outlined"
-            onDelete={clearFilterMode}
-          />
-        </Box>
-      )}
-
       {/* Barra de selección para órdenes parciales */}
       {control && orderableIds.length > 0 && (
         <Stack direction="row" spacing={1} sx={{ mb: 1 }} alignItems="center">
@@ -1088,7 +1067,7 @@ export default function StockControlShow() {
             onClick={handleSelectAllOrderable}
             disabled={visibleOrderableIds.length === 0}
           >
-            {noFiltersActive && !filterMode
+            {noFiltersActive
               ? "Seleccionar todos los pendientes"
               : `Seleccionar los ${visibleOrderableIds.length} pendiente(s) visible(s)`}
           </Button>
@@ -1117,7 +1096,7 @@ export default function StockControlShow() {
           {/* Los filtros pueden dejar la tabla vacia con chips encendidos (ej.
               una condicion sin faltantes por gestionar). Sin aviso parece que
               el control no tiene items o que algo fallo. */}
-          {items.length > 0 && visibleItems.length === 0 && !filterMode && (
+          {items.length > 0 && visibleItems.length === 0 && (
             <Alert
               severity="info"
               sx={{ mb: 1 }}

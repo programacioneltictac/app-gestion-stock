@@ -8,6 +8,8 @@ const { COST_EXPR } = require("../utils/costExpr");
 const MUY_PRIORITARIO_CONDITION_ID = 3;
 // Condición 'NUEVA MARCA' (id 4): no reponible, se excluye de los faltantes.
 const NON_REPLENISHABLE_CONDITION_ID = 4;
+// stock_status 'Sobrestock' (id 3), fuente única StockControl.determineStockStatus (>120%).
+const OVERSTOCK_STATUS_ID = 3;
 
 class Alert {
   /**
@@ -15,7 +17,7 @@ class Alert {
    * limita todo a esa sucursal; si es null (admin/manager), abarca todas.
    * Considera controles ACTIVOS (draft + completed) e ítems no pedidos; los
    * 'discontinued' quedan fuera (están apagados a propósito).
-   * @returns {Promise<object>} { muyPrioritarios, criticalBranches,
+   * @returns {Promise<object>} { muyPrioritarios, criticalBranches, overstockBranches,
    *   pendingOrders, authorizedOrders, cycleTime*Days, closedOrders*,
    *   avgCompliance, brandTrialsDue, discontinuedValue }
    */
@@ -47,7 +49,7 @@ class Alert {
          AND mc.status IN ('draft', 'completed')
          ${branchClause}
        GROUP BY mc.id, mc.branch_id, b.name, c.category_name
-       ORDER BY faltantes DESC, b.name`,
+       ORDER BY faltante_valor DESC, b.name`,
       params
     );
 
@@ -68,6 +70,36 @@ class Alert {
          ${branchClause}
        GROUP BY mc.branch_id, b.name, b.is_hub
        ORDER BY need_order_items DESC, b.name`,
+      params
+    );
+
+    // 2bis) Sucursales con SOBRESTOCK por sucursal+rubro: ítems del control
+    //    activo cuyo compliance supera el umbral de sobrestock (stock_status 3,
+    //    fuente única StockControl.determineStockStatus). Es el extremo opuesto
+    //    de (1): producto GESTIONADO que sobra, distinto del discontinuo (4),
+    //    que es producto fuera del control. Navega al control puntual.
+    const overstockBranches = await pool.query(
+      `SELECT mc.id          AS control_id,
+              mc.branch_id,
+              b.name          AS branch_name,
+              c.category_name,
+              COUNT(*)        AS excedentes,
+              -- Excedente valorizado: unidades por encima del requerido, al
+              -- costo estimado (mismo fallback que faltantes/órdenes). Los
+              -- LEFT JOIN son 1:1 por product_stock_id, no alteran el COUNT.
+              COALESCE(SUM((sc.stock_current - sc.stock_require) * ${COST_EXPR}), 0) AS sobrante_valor
+       FROM stock_controls sc
+       JOIN monthly_controls mc ON sc.monthly_control_id = mc.id
+       JOIN branches b   ON mc.branch_id = b.id
+       LEFT JOIN categories c ON mc.category_id = c.id
+       LEFT JOIN product_stock_by_branch psb ON psb.id = sc.product_stock_id
+       LEFT JOIN products p ON psb.product_id = p.id
+       WHERE sc.stock_status_id = ${OVERSTOCK_STATUS_ID}
+         AND mc.status IN ('draft', 'completed')
+         ${branchClause}
+       GROUP BY mc.id, mc.branch_id, b.name, c.category_name
+       HAVING SUM((sc.stock_current - sc.stock_require) * ${COST_EXPR}) > 0
+       ORDER BY sobrante_valor DESC, b.name`,
       params
     );
 
@@ -185,6 +217,7 @@ class Alert {
     return {
       muyPrioritarios: muyPrioritarios.rows,
       criticalBranches: criticalBranches.rows,
+      overstockBranches: overstockBranches.rows,
       // Órdenes pendientes: total (compat) + desglose por tipo.
       pendingOrders: Number(pendingOrders.rows[0]?.total || 0),
       pendingOrdersSupplier: Number(pendingOrders.rows[0]?.supplier || 0),

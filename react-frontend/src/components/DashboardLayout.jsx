@@ -8,6 +8,7 @@ import Typography from '@mui/material/Typography';
 import { Outlet } from 'react-router';
 import DashboardHeader from './DashboardHeader';
 import DashboardSidebar from './DashboardSidebar';
+import { thinScrollbarSx } from '../utils/scrollStyles';
 import SitemarkIcon from './SitemarkIcon';
 
 export default function DashboardLayout() {
@@ -80,12 +81,15 @@ export default function DashboardLayout() {
         <Toolbar sx={{ displayPrint: 'none' }} />
         <Box
           component="main"
-          sx={{
+          sx={(theme) => ({
             display: 'flex',
             flexDirection: 'column',
             flex: 1,
             overflow: 'auto',
-          }}
+            // Misma barra fina y translucida que el menu lateral y los
+            // listados del dashboard.
+            ...thinScrollbarSx(theme),
+          })}
         >
           <Outlet />
           {/* Atribución del favicon (licencia gratuita de Flaticon). */}

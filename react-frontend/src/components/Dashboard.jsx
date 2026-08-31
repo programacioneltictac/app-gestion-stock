@@ -15,6 +15,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import HubIcon from '@mui/icons-material/Hub';
@@ -30,6 +31,7 @@ import { getAlerts } from '../data/alerts';
 import { getSituation } from '../data/reports';
 import { generateSituationPdf } from '../utils/situationPdf';
 import PageContainer from './PageContainer';
+import { dashboardListScrollSx } from '../utils/scrollStyles';
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(value || 0);
@@ -120,6 +122,8 @@ export default function Dashboard() {
     if (!data) return { muyPrio: 0, critical: 0, discTotal: 0 };
     return {
       muyPrio: data.muyPrioritarios.reduce((s, r) => s + r.faltantes, 0),
+      // criticalBranches ya no tiene listado propio (se quitó a pedido), pero
+      // sigue alimentando la tarjeta "Ítems en generar pedido". No borrar.
       critical: data.criticalBranches.reduce((s, r) => s + r.needOrderItems, 0),
       discTotal: data.discontinuedValue.reduce((s, r) => s + r.value, 0),
     };
@@ -301,6 +305,7 @@ export default function Dashboard() {
             {data.muyPrioritarios.length === 0 ? (
               <Typography variant="body2" color="text.secondary">Sin faltantes prioritarios. 🎉</Typography>
             ) : (
+              <Box sx={dashboardListScrollSx}>
               <List dense disablePadding>
                 {data.muyPrioritarios.map((r) => (
                   <ListItemButton
@@ -317,35 +322,40 @@ export default function Dashboard() {
                   </ListItemButton>
                 ))}
               </List>
+              </Box>
             )}
           </CardContent>
         </Card>
 
-        {/* Sucursales críticas */}
+        {/* Sucursales con SOBRESTOCK */}
         <Card variant="outlined" sx={{ flex: '1 1 340px', minWidth: 320 }}>
           <CardContent>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-              <WarningAmberIcon color="warning" fontSize="small" />
-              <Typography variant="h6">Sucursales críticas</Typography>
+              <TrendingUpIcon color="warning" fontSize="small" />
+              <Typography variant="h6">Sucursales con SOBRESTOCK</Typography>
             </Stack>
             <Divider sx={{ mb: 1 }} />
-            {data.criticalBranches.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">Sin ítems pendientes de pedido.</Typography>
+            {data.overstockBranches.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">Sin sobrestock relevante.</Typography>
             ) : (
+              <Box sx={dashboardListScrollSx}>
               <List dense disablePadding>
-                {data.criticalBranches.map((r) => (
+                {data.overstockBranches.map((r) => (
                   <ListItemButton
-                    key={`cb-${r.branchId}`}
-                    onClick={() => navigate(`/stock-control/${r.branchId}`)}
+                    key={`ov-${r.controlId}`}
+                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?filter=overstock`, { state: { backTo: '/' } })}
                   >
-                    <ListItemText
-                      primary={r.branchName}
-                      secondary={r.isHub ? 'Nodo Hub' : undefined}
-                    />
-                    <Chip label={`${r.needOrderItems} a pedir`} color="warning" size="small" />
+                    <ListItemText primary={`${r.branchName} — ${r.categoryName}`} />
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Typography variant="body2" color="warning.main" fontWeight={500}>
+                        {formatCurrency(r.sobranteValor)}
+                      </Typography>
+                      <Chip label={r.excedentes} color="warning" size="small" />
+                    </Stack>
                   </ListItemButton>
                 ))}
               </List>
+              </Box>
             )}
           </CardContent>
         </Card>
@@ -361,8 +371,9 @@ export default function Dashboard() {
             {data.discontinuedValue.length === 0 ? (
               <Typography variant="body2" color="text.secondary">Sin stock discontinuo relevante.</Typography>
             ) : (
+              <Box sx={dashboardListScrollSx}>
               <List dense disablePadding>
-                {data.discontinuedValue.slice(0, 8).map((r) => (
+                {data.discontinuedValue.map((r) => (
                   <ListItemButton
                     key={`dv-${r.controlId}`}
                     onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?tab=discontinued`, { state: { backTo: '/' } })}
@@ -379,6 +390,7 @@ export default function Dashboard() {
                   </ListItemButton>
                 ))}
               </List>
+              </Box>
             )}
           </CardContent>
         </Card>

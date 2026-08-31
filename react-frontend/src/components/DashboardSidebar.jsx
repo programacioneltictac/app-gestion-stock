@@ -30,6 +30,7 @@ import {
   getDrawerSxTransitionMixin,
   getDrawerWidthTransitionMixin,
 } from "../mixins";
+import { thinScrollbarSx } from "../utils/scrollStyles";
 import { useAuth } from "../context/AuthContext";
 import { getBranchesList } from "../data/branches";
 
@@ -130,7 +131,7 @@ function DashboardSidebar({
         <Box
           component="nav"
           aria-label={`${viewport.charAt(0).toUpperCase()}${viewport.slice(1)}`}
-          sx={{
+          sx={(theme) => ({
             height: "100%",
             display: "flex",
             flexDirection: "column",
@@ -139,10 +140,12 @@ function DashboardSidebar({
             scrollbarGutter: mini ? "stable" : "auto",
             overflowX: "hidden",
             pt: !mini ? 0 : 2,
+            // Misma barra fina y translúcida que los listados del dashboard.
+            ...thinScrollbarSx(theme),
             ...(hasDrawerTransitions
               ? getDrawerSxTransitionMixin(isFullyExpanded, "padding")
               : {}),
-          }}
+          })}
         >
           <List
             dense
