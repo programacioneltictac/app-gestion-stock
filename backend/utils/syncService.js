@@ -537,10 +537,22 @@ async function persistBranchStock(branch, rows, opts = {}) {
           // dejaba a esos productos sin matchear: se creaba un duplicado y el
           // original quedaba en 0 (caso OPTIC 100 PASTA LEJOS, 434 unidades).
           // Por eso se compara contra CADA codigo del campo.
+          //
+          // Ademas se comparan los codigos NUMERICOS sin ceros a la izquierda:
+          // la BD guarda "006619" y el CSV trae "6619" para el mismo producto
+          // (1091 productos activos tienen ceros adelante). La comparacion
+          // ltrim solo se aplica cuando AMBOS lados son numericos, para no
+          // tocar codigos alfanumericos como "AC2+0.50" u "ORT00430".
           const existing = await client.query(
             `SELECT id FROM products
              WHERE category_id = $2 AND is_active = true
-               AND $1 = ANY(string_to_array(replace(product_code, ' ', ''), ','))
+               AND EXISTS (
+                 SELECT 1
+                 FROM unnest(string_to_array(replace(product_code, ' ', ''), ',')) AS pc
+                 WHERE pc = $1
+                    OR (pc ~ '^[0-9]+$' AND $1 ~ '^[0-9]+$'
+                        AND ltrim(pc, '0') = ltrim($1, '0'))
+               )
              ORDER BY external_id NULLS LAST, id
              LIMIT 1`,
             [codigos, currentCategoryId],
