@@ -8,6 +8,7 @@ import BrandList from "../components/BrandList";
 import SupplierList from "../components/SupplierList";
 import BrandTrialList from "../components/BrandTrialList";
 import SettingsPage from "../components/SettingsPage";
+import StockImportPage from "../components/StockImportPage";
 import StockControlList from "../components/StockControlList";
 import StockControlShow from "../components/StockControlShow";
 import QuickSearch from "../components/QuickSearch";
@@ -85,6 +86,15 @@ const router = createHashRouter([
         element: (
           <ProtectedRoute requiredRoles={["admin"]}>
             <SettingsPage />
+          </ProtectedRoute>
+        ),
+      },
+      // Importacion manual de stock por CSV (contingencia) — solo admin
+      {
+        path: "/import-stock",
+        element: (
+          <ProtectedRoute requiredRoles={["admin"]}>
+            <StockImportPage />
           </ProtectedRoute>
         ),
       },

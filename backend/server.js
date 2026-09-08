@@ -65,6 +65,10 @@ app.use("/api/product-groups", authenticateToken, productGroupRoutes);
 const syncRoutes = require("./routes/sync");
 app.use("/api/sync", authenticateToken, syncRoutes);
 
+// Rutas de importacion manual de stock por CSV (contingencia sin API de IDUO)
+const importRoutes = require("./routes/import");
+app.use("/api/import", authenticateToken, importRoutes);
+
 // Rutas de ordenes de reposicion
 const orderRoutes = require("./routes/orders");
 app.use("/api/orders", authenticateToken, orderRoutes);

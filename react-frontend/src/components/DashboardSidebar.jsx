@@ -20,6 +20,7 @@ import LocalShippingIcon from "@mui/icons-material/LocalShipping";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import ScienceIcon from "@mui/icons-material/Science";
 import SettingsIcon from "@mui/icons-material/Settings";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
 import { matchPath, useLocation } from "react-router";
 import DashboardSidebarContext from "../context/DashboardSidebarContext";
 import { DRAWER_WIDTH, MINI_DRAWER_WIDTH } from "../constants";
@@ -269,6 +270,13 @@ function DashboardSidebar({
                   icon={<PeopleIcon />}
                   href="/users"
                   selected={!!matchPath("/users/*", pathname)}
+                />
+                <DashboardSidebarPageItem
+                  id="import-stock"
+                  title="Importar stock"
+                  icon={<UploadFileIcon />}
+                  href="/import-stock"
+                  selected={!!matchPath("/import-stock/*", pathname)}
                 />
                 <DashboardSidebarPageItem
                   id="settings"

@@ -281,7 +281,9 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
         // `( p.category_id = $2 OR cg.id = $2 )` muestran el producto en el
         // rubro equivocado o en los dos. Por eso se sellan las tres juntas.
         rawProducts.push({
-          raw: p,
+          // Normalizado aca: persistBranchStock recibe campos ya extraidos,
+          // no el crudo de la API, para que el CSV pueda alimentarlo igual.
+          fields: extractApiFields(p),
           categoryId: effective.id,
           categoryName: effective.category_name,
           nameKeywords: effective.name_keywords || [],
@@ -325,37 +327,109 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
     throw err;
   }
 
+  return persistBranchStock(branch, rawProducts, {
+    groupableBrands,
+    allBrands,
+    stats,
+  });
+}
+
+/**
+ * Escribe en la BD el stock de UNA sucursal a partir de filas YA NORMALIZADAS.
+ *
+ * Es el tramo comun a las dos fuentes de datos: la API de IDUO (syncBranch) y
+ * la importacion manual de CSV (importService). Todo lo que hay aca abajo —
+ * upsert de grupos y productos, promedio incremental de costo, actualizacion
+ * de los controles activos y liberacion de items pedidos — vale igual venga de
+ * donde venga el dato, asi que vive en un solo lugar. Duplicarlo para el CSV
+ * habria dejado dos pipelines divergiendo con el tiempo.
+ *
+ * @param {Object} branch - { id, name }
+ * @param {Array} rows - Filas normalizadas. Cada una:
+ *   { fields: { externalId, productName, codigos, stock, costPrice },
+ *     categoryId, categoryName, nameKeywords }
+ *   `externalId` puede venir null (el CSV no lo trae): en ese caso la identidad
+ *   la resuelve `resolveProductId` por product_code + categoria.
+ * @param {Object} opts
+ *   @param {Array} opts.groupableBrands - Marcas agrupables
+ *   @param {Array} opts.allBrands - Todas las marcas activas
+ *   @param {Object} [opts.stats] - Acumulador { synced, grouped, errors }
+ *   @param {Array<number>|null} [opts.resetCategoryIds] - GUARD ANTI-VACIADO POR
+ *     RUBRO. Si viene, el reset a 0 se acota a esas categorias y los rubros
+ *     ausentes CONSERVAN su stock anterior en vez de quedar en 0. null = reset
+ *     total de la sucursal (comportamiento historico del sync por API, que
+ *     siempre consulta todos los rubros).
+ * @returns {{ synced, grouped, errors }}
+ */
+async function persistBranchStock(branch, rows, opts = {}) {
+  const {
+    groupableBrands = [],
+    allBrands = [],
+    resetCategoryIds = null,
+  } = opts;
+  const stats = opts.stats || { synced: 0, grouped: 0, errors: 0 };
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
     // Poner stock=0 y resetear acumuladores de costo antes de acumular.
     // Se usa UPDATE en lugar de DELETE para preservar los IDs referenciados por stock_controls.
-    await client.query(
-      `UPDATE product_stock_by_branch
-       SET stock = 0, avg_cost = 0, cost_item_count = 0, last_sync_at = NOW()
-       WHERE branch_id = $1`,
-      [branch.id],
-    );
+    //
+    // GUARD ANTI-VACIADO POR RUBRO: con `resetCategoryIds` el reset se limita a
+    // los rubros que la fuente efectivamente trajo. El sync por API resetea todo
+    // (consulta las 7 categorias siempre), pero un CSV manual puede traer solo
+    // los rubros con stock: sin este recorte, importar un CSV sin FITNESS
+    // dejaria todo el FITNESS de esa sucursal en 0 y lo propagaria a los
+    // controles activos, commiteando "con exito".
+    if (resetCategoryIds && resetCategoryIds.length > 0) {
+      await client.query(
+        `UPDATE product_stock_by_branch psb
+         SET stock = 0, avg_cost = 0, cost_item_count = 0, last_sync_at = NOW()
+         WHERE psb.branch_id = $1
+           AND (
+             -- fila de producto suelto: su categoria decide
+             EXISTS (
+               SELECT 1 FROM products p
+               WHERE p.id = psb.product_id AND p.category_id = ANY($2::int[])
+             )
+             -- fila de grupo: el rubro del grupo decide
+             OR EXISTS (
+               SELECT 1 FROM product_groups g
+               JOIN categories c ON c.category_name = g.category_type
+               WHERE g.id = psb.group_id AND c.id = ANY($2::int[])
+             )
+           )`,
+        [branch.id, resetCategoryIds],
+      );
+    } else {
+      await client.query(
+        `UPDATE product_stock_by_branch
+         SET stock = 0, avg_cost = 0, cost_item_count = 0, last_sync_at = NOW()
+         WHERE branch_id = $1`,
+        [branch.id],
+      );
+    }
 
     // Cache de grupos ya creados en esta sync para no re-consultar
     const groupCache = {};
 
     for (const {
-      raw,
+      fields,
       categoryId: currentCategoryId,
       categoryName: currentCategoryName,
       nameKeywords: currentNameKeywords,
-    } of rawProducts) {
+    } of rows) {
       // SAVEPOINT por iteracion: si un producto falla (ej: UNIQUE violation),
       // se hace ROLLBACK solo de ese producto y la transaccion sigue viva
       // para los siguientes. Sin esto, un solo error envenena toda la sync.
       await client.query("SAVEPOINT sp_product");
       try {
-        const { externalId, productName, codigos, stock, costPrice } =
-          extractApiFields(raw);
+        const { externalId, productName, codigos, stock, costPrice } = fields;
 
-        if (!externalId || !productName) {
+        // Sin nombre no hay nada que hacer. `externalId` puede faltar (CSV):
+        // en ese caso la identidad se resuelve mas abajo por product_code.
+        if (!productName || (!externalId && !codigos)) {
           await client.query("RELEASE SAVEPOINT sp_product");
           continue;
         }
@@ -409,14 +483,25 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
           groupId = groupCache[cacheKey];
         }
 
-        // --- Upsert del producto (incluye cost_price). RETURNING evita un SELECT extra. ---
-        const productResult = await client.query(
-          `INSERT INTO products
-             (product_name, product_code, external_id, display_name,
-              group_id, is_grouped, category_id, brand_id, cost_price, last_sync_at, is_active)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), true)
-           ON CONFLICT (external_id) WHERE external_id IS NOT NULL DO UPDATE
-             SET product_name  = EXCLUDED.product_name,
+        // --- Upsert del producto (incluye cost_price) ---
+        // Dos identidades posibles segun la fuente:
+        //   API  -> external_id (idproducto de IDUO), la identidad canonica.
+        //   CSV  -> product_code, porque el export de IDUO NO trae idproducto.
+        // El CSV desambigua ademas por categoria: hay codigos repetidos entre
+        // rubros (mismo articulo cargado dos veces en IDUO, ej. MAX POLAR
+        // 281347 que existe como ARMAZON y como LENTE DE SOL).
+        const upsertValues = [
+          productName,
+          codigos,
+          externalId,
+          cleanName,
+          groupId,
+          groupInfo.isGrouped,
+          currentCategoryId,
+          brandId,
+          costPrice > 0 ? costPrice : null,
+        ];
+        const UPSERT_SET = `SET product_name  = EXCLUDED.product_name,
                  product_code  = EXCLUDED.product_code,
                  display_name  = EXCLUDED.display_name,
                  group_id      = EXCLUDED.group_id,
@@ -425,21 +510,75 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
                  brand_id      = EXCLUDED.brand_id,
                  cost_price    = EXCLUDED.cost_price,
                  last_sync_at  = NOW(),
-                 updated_at    = NOW()
-           RETURNING id`,
-          [
-            productName,
-            codigos,
-            externalId,
-            cleanName,
-            groupId,
-            groupInfo.isGrouped,
-            currentCategoryId,
-            brandId,
-            costPrice > 0 ? costPrice : null,
-          ],
-        );
-        const productId = productResult.rows[0]?.id;
+                 updated_at    = NOW()`;
+
+        let productId;
+        if (externalId) {
+          const productResult = await client.query(
+            `INSERT INTO products
+               (product_name, product_code, external_id, display_name,
+                group_id, is_grouped, category_id, brand_id, cost_price, last_sync_at, is_active)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), true)
+             ON CONFLICT (external_id) WHERE external_id IS NOT NULL DO UPDATE
+               ${UPSERT_SET}
+             RETURNING id`,
+            upsertValues,
+          );
+          productId = productResult.rows[0]?.id;
+        } else {
+          // Sin external_id: buscar por product_code + categoria. No se puede
+          // usar ON CONFLICT porque product_code NO tiene indice unico (y no
+          // debe tenerlo: el mismo codigo existe legitimamente en dos rubros).
+          const existing = await client.query(
+            `SELECT id FROM products
+             WHERE product_code = $1 AND category_id = $2 AND is_active = true
+             ORDER BY external_id NULLS LAST, id
+             LIMIT 1`,
+            [codigos, currentCategoryId],
+          );
+
+          if (existing.rows[0]) {
+            const updated = await client.query(
+              `UPDATE products
+               SET product_name = $1,
+                   display_name = $2,
+                   group_id     = $3,
+                   is_grouped   = $4,
+                   brand_id     = $5,
+                   cost_price   = $6,
+                   last_sync_at = NOW(),
+                   updated_at   = NOW()
+               WHERE id = $7
+               RETURNING id`,
+              [
+                productName,
+                cleanName,
+                groupId,
+                groupInfo.isGrouped,
+                brandId,
+                costPrice > 0 ? costPrice : null,
+                existing.rows[0].id,
+              ],
+            );
+            productId = updated.rows[0]?.id;
+          } else {
+            // Producto nuevo: se crea con external_id NULL. Cuando IDUO libere
+            // la API, el sync lo va a encontrar por su idproducto real y lo
+            // insertara aparte; la limpieza de ese solapamiento es manual y
+            // esta documentada en el flujo de contingencia.
+            const inserted = await client.query(
+              `INSERT INTO products
+                 (product_name, product_code, external_id, display_name,
+                  group_id, is_grouped, category_id, brand_id, cost_price, last_sync_at, is_active)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), true)
+               RETURNING id`,
+              upsertValues,
+            );
+            productId = inserted.rows[0]?.id;
+            stats.created = (stats.created || 0) + 1;
+          }
+        }
+
         if (!productId) {
           await client.query("RELEASE SAVEPOINT sp_product");
           continue;
@@ -511,7 +650,7 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
         await client.query("RELEASE SAVEPOINT sp_product");
         stats.errors++;
         console.error(
-          `Error procesando producto ${raw?.idproducto}:`,
+          `Error procesando producto ${fields?.externalId || fields?.codigos}:`,
           err.message,
         );
       }
@@ -754,6 +893,8 @@ async function syncAllBranches() {
 module.exports = {
   syncAllBranches,
   syncBranch,
+  persistBranchStock,
   fetchProductsFromApi,
   getGroupableBrands,
+  getAllBrands,
 };
