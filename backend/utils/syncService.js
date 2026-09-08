@@ -529,9 +529,18 @@ async function persistBranchStock(branch, rows, opts = {}) {
           // Sin external_id: buscar por product_code + categoria. No se puede
           // usar ON CONFLICT porque product_code NO tiene indice unico (y no
           // debe tenerlo: el mismo codigo existe legitimamente en dos rubros).
+          //
+          // OJO: `products.product_code` puede guardar VARIOS codigos separados
+          // por coma ("109068, 737592" — hasta 4 en un mismo campo, 152 productos
+          // activos), porque asi los devuelve la API en `codigos`. El CSV, en
+          // cambio, trae UN solo codigo por fila. Comparar por igualdad exacta
+          // dejaba a esos productos sin matchear: se creaba un duplicado y el
+          // original quedaba en 0 (caso OPTIC 100 PASTA LEJOS, 434 unidades).
+          // Por eso se compara contra CADA codigo del campo.
           const existing = await client.query(
             `SELECT id FROM products
-             WHERE product_code = $1 AND category_id = $2 AND is_active = true
+             WHERE category_id = $2 AND is_active = true
+               AND $1 = ANY(string_to_array(replace(product_code, ' ', ''), ','))
              ORDER BY external_id NULLS LAST, id
              LIMIT 1`,
             [codigos, currentCategoryId],

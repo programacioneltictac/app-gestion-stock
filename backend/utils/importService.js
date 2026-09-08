@@ -134,16 +134,22 @@ async function analyzeStockCsv(content) {
   // --- Cuantos existen ya en la BD (por codigo + rubro) ---
   const codes = rows.map((r) => r.code);
   const cats = rows.map((r) => r.categoryId);
+  // El campo product_code puede guardar VARIOS codigos separados por coma
+  // ("109068, 737592"), porque asi los devuelve la API en `codigos`. El CSV trae
+  // uno solo por fila, asi que hay que comparar contra cada uno del campo o el
+  // producto se reporta como "nuevo" cuando en realidad ya existe.
+  // Mismo criterio que la resolucion de identidad en persistBranchStock.
   const existing = await pool.query(
-    `SELECT DISTINCT p.product_code, p.category_id
-     FROM products p
-     JOIN UNNEST($1::text[], $2::int[]) AS t(code, cat)
-       ON p.product_code = t.code AND p.category_id = t.cat
+    `SELECT DISTINCT t.code, t.cat
+     FROM UNNEST($1::text[], $2::int[]) AS t(code, cat)
+     JOIN products p
+       ON p.category_id = t.cat
+      AND t.code = ANY(string_to_array(replace(p.product_code, ' ', ''), ','))
      WHERE p.is_active = true`,
     [codes, cats],
   );
   const existingKeys = new Set(
-    existing.rows.map((r) => `${r.product_code}|${r.category_id}`),
+    existing.rows.map((r) => `${r.code}|${r.cat}`),
   );
   const toCreate = rows.filter(
     (r) => !existingKeys.has(`${r.code}|${r.categoryId}`),
