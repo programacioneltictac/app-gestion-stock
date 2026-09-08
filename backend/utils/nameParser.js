@@ -86,6 +86,50 @@ function parseProductName(name, keywords = []) {
 }
 
 /**
+ * Determina el rubro que declara el NOMBRE del producto (no el rubro por el que
+ * la API lo devolvio). Es el blindaje contra productos que IDUO cuelga de un
+ * rubro padre viejo: el sufijo del nombre lo escribe quien carga el producto y
+ * es la fuente confiable.
+ *
+ * No se asume el patron canonico "MM-AA RUBRO" porque hay dos variantes que
+ * darian falso negativo:
+ *   - Nombres con DOS numeros con forma de fecha ("... 50-44 10-22 CLIPONES"):
+ *     un regex anclado en \d{2}-\d{2} matchea la PRIMERA (50-44) y captura
+ *     "10-22 CLIPONES", que no coincide con ningun keyword.
+ *   - Nombres SIN fecha, con el rubro pegado al final ("ACUVUE 2 ESF+0.50
+ *     LCONTACTO", "MIR KETTLEBELL 3KG FITNESS").
+ * Por eso se matchea cada keyword conocido ANCLADO AL FINAL del nombre.
+ *
+ * @param {string} productName - Nombre CRUDO del producto (el sufijo no esta en
+ *                               display_name: parseProductName ya lo quito).
+ * @param {Array<{keyword: string, categoryId: number}>} keywordToCat
+ *        Keywords conocidos con su categoria destino. Deben venir ordenados por
+ *        longitud descendente ("LENTES DE SOL" antes que "LENTE DE SOL").
+ * @returns {{ categoryId: number, keyword: string } | null}
+ *          null = el nombre no declara ningun rubro conocido -> NO tocar,
+ *          se respeta la categoria que dijo la API.
+ */
+function detectCategoryFromName(productName, keywordToCat) {
+  const upper = String(productName || "").toUpperCase().trim();
+  if (!upper || !Array.isArray(keywordToCat) || keywordToCat.length === 0) {
+    return null;
+  }
+
+  for (const entry of keywordToCat) {
+    if (!entry || !entry.keyword) continue;
+    // (^|\s)KEYWORD$  -> el rubro va al final, con o sin fecha delante.
+    // Los espacios del keyword se vuelven \s+ flexibles (mismo criterio que
+    // parseProductName) para tolerar doble espacio en la carga de IDUO.
+    const kwPattern = escapeRegex(entry.keyword.toUpperCase()).replace(/ +/g, "\\s+");
+    const re = new RegExp(`(?:^|\\s)${kwPattern}\\s*$`);
+    if (re.test(upper)) {
+      return { categoryId: entry.categoryId, keyword: entry.keyword };
+    }
+  }
+  return null;
+}
+
+/**
  * Determina si un producto pertenece a una marca agrupable y devuelve los datos del grupo.
  * @param {string} cleanName    - Nombre ya limpio (sin fecha/rubro)
  * @param {string} categoryName - Nombre de la categoría del request (ej: "ARMAZONES",
@@ -165,4 +209,9 @@ function detectBrandInName(productName, brands) {
   return null;
 }
 
-module.exports = { parseProductName, detectGroup, detectBrandInName };
+module.exports = {
+  parseProductName,
+  detectGroup,
+  detectBrandInName,
+  detectCategoryFromName,
+};

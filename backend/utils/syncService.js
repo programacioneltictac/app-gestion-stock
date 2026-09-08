@@ -1,6 +1,11 @@
 const axios = require("axios");
 const { pool } = require("../database/config");
-const { parseProductName, detectGroup, detectBrandInName } = require("./nameParser");
+const {
+  parseProductName,
+  detectGroup,
+  detectBrandInName,
+  detectCategoryFromName,
+} = require("./nameParser");
 const StockControl = require("../models/StockControl");
 
 /**
@@ -31,6 +36,14 @@ const REQUEST_DELAY_MS = Math.max(
   0,
   Number(process.env.SYNC_REQUEST_DELAY_MS) || 0,
 );
+
+// Blindaje de rubro: el sufijo del NOMBRE decide la categoría, por encima del
+// rubro por el que la API devolvió el producto. Protege contra productos que
+// IDUO cuelga de un rubro padre viejo (ver detectCategoryFromName).
+// Default ACTIVADO. Se apaga desde Render con SYNC_TRUST_NAME_SUFFIX=false,
+// sin necesidad de redeploy.
+const TRUST_NAME_SUFFIX =
+  String(process.env.SYNC_TRUST_NAME_SUFFIX || "true").toLowerCase() !== "false";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -197,9 +210,33 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
     return stats;
   }
 
+  // Índice de categorías por id, para resolver la categoría efectiva sin re-consultar.
+  const categoryById = new Map(categories.map((c) => [c.id, c]));
+
+  // Mapa keyword → categoría destino, para detectCategoryFromName.
+  // Sale de la query de categorías que ya se hizo arriba: no hace falta consulta nueva.
+  // Ordenado por longitud descendente: "LENTES DE SOL" tiene que ganarle a "LENTE DE SOL".
+  const keywordToCat = categories
+    .flatMap((c) =>
+      (c.name_keywords || [])
+        .filter(Boolean)
+        .map((kw) => ({ keyword: String(kw), categoryId: c.id })),
+    )
+    .sort((a, b) => b.keyword.length - a.keyword.length);
+
   // Recopilar productos de cada categoría junto con su category_id.
   // Se aplica REQUEST_DELAY_MS entre requests para no saturar al proveedor externo.
   const rawProducts = [];
+  // Dedupe por external_id (OBLIGATORIO, no es una optimización).
+  // Hay productos que la API devuelve por DOS rubros a la vez (doble padre).
+  // Sin blindaje cada pasada los mandaba a un grupo distinto, así que no se
+  // pisaban. Al reasignar ambas al MISMO destino, la rama agrupada de más abajo
+  // acumula (`stock = stock + $3`) y sumaría el mismo stock DOS VECES.
+  // Nos quedamos con la primera aparición y descartamos las repetidas.
+  const seenExternalIds = new Map(); // external_id → categoría de la 1ª aparición
+  let reassignedCount = 0;
+  let duplicateCount = 0;
+
   for (let idx = 0; idx < categories.length; idx++) {
     const category = categories[idx];
     try {
@@ -211,14 +248,45 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
       console.log(
         `  [${branch.name}] Categoría ${category.category_name}: ${products.length} productos`,
       );
-      products.forEach((p) =>
+      for (const p of products) {
+        const { externalId, productName } = extractApiFields(p);
+
+        // Categoría efectiva: la que declara el sufijo del nombre le gana a la
+        // del rubro consultado. null = el nombre no declara rubro conocido →
+        // se respeta lo que dijo la API.
+        let effective = category;
+        if (TRUST_NAME_SUFFIX) {
+          const fromName = detectCategoryFromName(productName, keywordToCat);
+          if (fromName && fromName.categoryId !== category.id) {
+            const target = categoryById.get(fromName.categoryId);
+            if (target) {
+              effective = target;
+              reassignedCount++;
+            }
+          }
+        }
+
+        if (externalId) {
+          const prev = seenExternalIds.get(externalId);
+          if (prev) {
+            // Ya lo trajimos por otro rubro: descartar para no inflar el stock.
+            duplicateCount++;
+            continue;
+          }
+          seenExternalIds.set(externalId, effective.category_name);
+        }
+
+        // INVARIANTE: parseProductName, detectGroup y category_id tienen que
+        // recibir LA MISMA categoría. Si se desincronizan, los filtros
+        // `( p.category_id = $2 OR cg.id = $2 )` muestran el producto en el
+        // rubro equivocado o en los dos. Por eso se sellan las tres juntas.
         rawProducts.push({
           raw: p,
-          categoryId: category.id,
-          categoryName: category.category_name,
-          nameKeywords: category.name_keywords || [],
-        }),
-      );
+          categoryId: effective.id,
+          categoryName: effective.category_name,
+          nameKeywords: effective.name_keywords || [],
+        });
+      }
     } catch (err) {
       console.error(
         `  [${branch.name}] Error en categoría ${category.category_name}:`,
@@ -231,6 +299,14 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
     if (REQUEST_DELAY_MS > 0 && idx < categories.length - 1) {
       await sleep(REQUEST_DELAY_MS);
     }
+  }
+
+  // Con la API de IDUO sana, lo esperado es 0 reasignados y 0 duplicados.
+  // Si estos contadores suben, IDUO volvió a colgar productos de un rubro viejo.
+  if (TRUST_NAME_SUFFIX && (reassignedCount > 0 || duplicateCount > 0)) {
+    console.log(
+      `  [${branch.name}] Blindaje de rubro: ${reassignedCount} producto(s) reasignado(s) por el sufijo del nombre, ${duplicateCount} duplicado(s) por doble rubro descartado(s)`,
+    );
   }
 
   // GUARD anti-vaciado: si NINGUNA categoría devolvió productos, NO tocar la BD.
