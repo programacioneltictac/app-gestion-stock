@@ -290,6 +290,11 @@ async function importStockCsv(content, opts = {}) {
     // GUARD ANTI-VACIADO POR RUBRO: solo se resetean los rubros que trae el
     // archivo. Un rubro ausente conserva su stock anterior en vez de quedar en 0.
     resetCategoryIds: analysis._categoryIds,
+    // "Ultima sync" debe ser el momento de la FOTO, no el de la importacion:
+    // el export puede subirse horas o dias despues de generarse, y guardar
+    // NOW() haria parecer fresco un stock viejo en la pantalla de control.
+    // Si el header no trae fecha, `exportedAt` es null y se cae a NOW().
+    syncedAt: analysis.exportedAt,
   });
 
   console.log(

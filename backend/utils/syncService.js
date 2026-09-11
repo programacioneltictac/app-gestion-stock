@@ -359,6 +359,12 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
  *     ausentes CONSERVAN su stock anterior en vez de quedar en 0. null = reset
  *     total de la sucursal (comportamiento historico del sync por API, que
  *     siempre consulta todos los rubros).
+ *   @param {Date|null} [opts.syncedAt] - Momento al que corresponde la FOTO de
+ *     stock, que es lo que se guarda en `last_sync_at`. Por API es "ahora"
+ *     (se consulta en vivo) y por eso el default es NOW(). Por CSV es la fecha
+ *     del header del export ("Fecha: 08/09/2026 13:32:36"), que puede ser MUY
+ *     anterior al momento de importarlo: guardar NOW() ahi mentiria sobre la
+ *     antiguedad del dato en la pantalla de control.
  * @returns {{ synced, grouped, errors }}
  */
 async function persistBranchStock(branch, rows, opts = {}) {
@@ -366,7 +372,10 @@ async function persistBranchStock(branch, rows, opts = {}) {
     groupableBrands = [],
     allBrands = [],
     resetCategoryIds = null,
+    syncedAt = null,
   } = opts;
+  // Se interpola como $n en cada UPDATE/INSERT: con null, COALESCE cae en NOW().
+  const syncTs = syncedAt || null;
   const stats = opts.stats || { synced: 0, grouped: 0, errors: 0 };
 
   const client = await pool.connect();
@@ -385,7 +394,8 @@ async function persistBranchStock(branch, rows, opts = {}) {
     if (resetCategoryIds && resetCategoryIds.length > 0) {
       await client.query(
         `UPDATE product_stock_by_branch psb
-         SET stock = 0, avg_cost = 0, cost_item_count = 0, last_sync_at = NOW()
+         SET stock = 0, avg_cost = 0, cost_item_count = 0,
+             last_sync_at = COALESCE($3::timestamp, NOW())
          WHERE psb.branch_id = $1
            AND (
              -- fila de producto suelto: su categoria decide
@@ -400,14 +410,15 @@ async function persistBranchStock(branch, rows, opts = {}) {
                WHERE g.id = psb.group_id AND c.id = ANY($2::int[])
              )
            )`,
-        [branch.id, resetCategoryIds],
+        [branch.id, resetCategoryIds, syncTs],
       );
     } else {
       await client.query(
         `UPDATE product_stock_by_branch
-         SET stock = 0, avg_cost = 0, cost_item_count = 0, last_sync_at = NOW()
+         SET stock = 0, avg_cost = 0, cost_item_count = 0,
+             last_sync_at = COALESCE($2::timestamp, NOW())
          WHERE branch_id = $1`,
-        [branch.id],
+        [branch.id, syncTs],
       );
     }
 
@@ -613,7 +624,7 @@ async function persistBranchStock(branch, rows, opts = {}) {
           await client.query(
             `INSERT INTO product_stock_by_branch
                (branch_id, group_id, stock, display_name, avg_cost, cost_item_count, last_sync_at)
-             VALUES ($1, $2, $3, $4, $5, $6, NOW())
+             VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamp, NOW()))
              ON CONFLICT (branch_id, group_id) DO UPDATE
                SET stock            = product_stock_by_branch.stock + $3,
                    display_name     = EXCLUDED.display_name,
@@ -630,7 +641,7 @@ async function persistBranchStock(branch, rows, opts = {}) {
                      THEN product_stock_by_branch.cost_item_count + 1
                      ELSE product_stock_by_branch.cost_item_count
                    END,
-                   last_sync_at     = NOW()`,
+                   last_sync_at     = COALESCE($7::timestamp, NOW())`,
             [
               branch.id,
               groupId,
@@ -638,6 +649,7 @@ async function persistBranchStock(branch, rows, opts = {}) {
               groupInfo.displayName,
               costPrice > 0 ? costPrice : null,
               costPrice > 0 ? 1 : 0,
+              syncTs,
             ],
           );
         } else {
@@ -645,13 +657,13 @@ async function persistBranchStock(branch, rows, opts = {}) {
           await client.query(
             `INSERT INTO product_stock_by_branch
                (branch_id, product_id, stock, display_name, avg_cost, cost_item_count, last_sync_at)
-             VALUES ($1, $2, $3, $4, $5, $6, NOW())
+             VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamp, NOW()))
              ON CONFLICT (branch_id, product_id) DO UPDATE
                SET stock           = $3,
                    display_name    = EXCLUDED.display_name,
                    avg_cost        = EXCLUDED.avg_cost,
                    cost_item_count = EXCLUDED.cost_item_count,
-                   last_sync_at    = NOW()`,
+                   last_sync_at    = COALESCE($7::timestamp, NOW())`,
             [
               branch.id,
               productId,
@@ -659,6 +671,7 @@ async function persistBranchStock(branch, rows, opts = {}) {
               cleanName,
               costPrice > 0 ? costPrice : null,
               costPrice > 0 ? 1 : 0,
+              syncTs,
             ],
           );
         }
