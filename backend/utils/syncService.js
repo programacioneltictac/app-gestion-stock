@@ -236,6 +236,11 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
   const seenExternalIds = new Map(); // external_id → categoría de la 1ª aparición
   let reassignedCount = 0;
   let duplicateCount = 0;
+  // GUARD ANTI-VACIADO POR RUBRO: rubros de los que NO tenemos informacion en
+  // esta pasada, ya sea porque fallaron (excepcion) o porque respondieron [].
+  // Un [] no se distingue de un token de IDUO vencido (responde 200 con []),
+  // asi que se trata igual que un fallo: el rubro CONSERVA su stock anterior.
+  const failedCategoryIds = new Set();
 
   for (let idx = 0; idx < categories.length; idx++) {
     const category = categories[idx];
@@ -248,6 +253,9 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
       console.log(
         `  [${branch.name}] Categoría ${category.category_name}: ${products.length} productos`,
       );
+      if (products.length === 0) {
+        failedCategoryIds.add(category.id);
+      }
       for (const p of products) {
         const { externalId, productName } = extractApiFields(p);
 
@@ -295,6 +303,7 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
         err.message,
       );
       stats.errors++;
+      failedCategoryIds.add(category.id);
     }
 
     // Pausa entre categorías (no después de la última)
@@ -309,6 +318,32 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
     console.log(
       `  [${branch.name}] Blindaje de rubro: ${reassignedCount} producto(s) reasignado(s) por el sufijo del nombre, ${duplicateCount} duplicado(s) por doble rubro descartado(s)`,
     );
+  }
+
+  // Rubros sin informacion: se descartan TAMBIEN las filas que el sufijo del
+  // nombre reasigno HACIA ellos desde un rubro que si respondio. Ese rubro no
+  // se resetea (conserva su foto anterior) y en las filas de grupo el stock se
+  // ACUMULA (`stock = stock + $3`): sumarle productos encima del valor viejo
+  // inflaria el stock. Mejor el rubro entero con la foto anterior, coherente.
+  let preservedCategoryIds = null; // null = reset total (todos respondieron)
+  if (failedCategoryIds.size > 0) {
+    const before = rawProducts.length;
+    for (let i = rawProducts.length - 1; i >= 0; i--) {
+      if (failedCategoryIds.has(rawProducts[i].categoryId)) rawProducts.splice(i, 1);
+    }
+    const preservedNames = categories
+      .filter((c) => failedCategoryIds.has(c.id))
+      .map((c) => c.category_name);
+    stats.preserved_categories = preservedNames;
+    console.warn(
+      `  [${branch.name}] ⚠️ Rubro(s) sin datos, se CONSERVA el stock anterior: ${preservedNames.join(", ")}` +
+        (before > rawProducts.length
+          ? ` (${before - rawProducts.length} fila(s) reasignada(s) hacia ellos descartada(s))`
+          : ""),
+    );
+    preservedCategoryIds = categories
+      .filter((c) => !failedCategoryIds.has(c.id))
+      .map((c) => c.id);
   }
 
   // GUARD anti-vaciado: si NINGUNA categoría devolvió productos, NO tocar la BD.
@@ -331,6 +366,7 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
     groupableBrands,
     allBrands,
     stats,
+    resetCategoryIds: preservedCategoryIds,
   });
 }
 
@@ -357,8 +393,9 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
  *   @param {Array<number>|null} [opts.resetCategoryIds] - GUARD ANTI-VACIADO POR
  *     RUBRO. Si viene, el reset a 0 se acota a esas categorias y los rubros
  *     ausentes CONSERVAN su stock anterior en vez de quedar en 0. null = reset
- *     total de la sucursal (comportamiento historico del sync por API, que
- *     siempre consulta todos los rubros).
+ *     total de la sucursal. El sync por API pasa null cuando respondieron todos
+ *     los rubros, y la lista de los que respondieron cuando alguno fallo o vino
+ *     vacio. El CSV pasa los rubros presentes en el archivo.
  *   @param {Date|null} [opts.syncedAt] - Momento al que corresponde la FOTO de
  *     stock, que es lo que se guarda en `last_sync_at`. Por API es "ahora"
  *     (se consulta en vivo) y por eso el default es NOW(). Por CSV es la fecha
@@ -386,11 +423,10 @@ async function persistBranchStock(branch, rows, opts = {}) {
     // Se usa UPDATE en lugar de DELETE para preservar los IDs referenciados por stock_controls.
     //
     // GUARD ANTI-VACIADO POR RUBRO: con `resetCategoryIds` el reset se limita a
-    // los rubros que la fuente efectivamente trajo. El sync por API resetea todo
-    // (consulta las 7 categorias siempre), pero un CSV manual puede traer solo
-    // los rubros con stock: sin este recorte, importar un CSV sin FITNESS
-    // dejaria todo el FITNESS de esa sucursal en 0 y lo propagaria a los
-    // controles activos, commiteando "con exito".
+    // los rubros que la fuente efectivamente trajo. Un CSV manual puede traer
+    // solo los rubros con stock, y por API un rubro puede fallar o venir vacio:
+    // sin este recorte, ese rubro quedaria en 0 en la sucursal y lo propagaria
+    // a los controles activos, commiteando "con exito".
     if (resetCategoryIds && resetCategoryIds.length > 0) {
       await client.query(
         `UPDATE product_stock_by_branch psb
@@ -918,6 +954,13 @@ async function syncAllBranches() {
     for (const r of results.filter((x) => x.status === "error")) {
       console.warn(`  ⚠️  ${r.branch}: ${r.message}`);
     }
+  }
+  // Sucursales OK pero con rubros conservados: el stock de esos rubros es la
+  // foto del sync anterior, no la de hoy.
+  for (const r of results.filter((x) => x.preserved_categories?.length)) {
+    console.warn(
+      `  ⚠️  ${r.branch}: rubro(s) con stock anterior conservado: ${r.preserved_categories.join(", ")}`,
+    );
   }
   console.log(`Duración total: ${formatDuration(totalElapsed)}\n`);
 
