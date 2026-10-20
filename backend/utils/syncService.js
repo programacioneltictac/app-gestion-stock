@@ -236,10 +236,14 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
   const seenExternalIds = new Map(); // external_id → categoría de la 1ª aparición
   let reassignedCount = 0;
   let duplicateCount = 0;
-  // GUARD ANTI-VACIADO POR RUBRO: rubros de los que NO tenemos informacion en
-  // esta pasada, ya sea porque fallaron (excepcion) o porque respondieron [].
-  // Un [] no se distingue de un token de IDUO vencido (responde 200 con []),
-  // asi que se trata igual que un fallo: el rubro CONSERVA su stock anterior.
+  // GUARD ANTI-VACIADO POR RUBRO: rubros que FALLARON (excepcion) en esta
+  // pasada. Esos CONSERVAN su stock anterior.
+  // Un rubro que responde [] NO entra aca: si otro rubro de la sucursal trajo
+  // datos, la API esta sana y el [] es un vacio real (el rubro se agoto o la
+  // sucursal no lo maneja) -> va a 0. Tratarlo como fallo lo dejaba CONGELADO
+  // con la foto vieja para siempre (caso Santa Lucia ORTOPEDIA, 2026-10-20).
+  // El token de IDUO vencido (200 con [] en TODOS los rubros) lo frena el
+  // guard global de mas abajo (EMPTY_API_RESPONSE), no este.
   const failedCategoryIds = new Set();
 
   for (let idx = 0; idx < categories.length; idx++) {
@@ -253,9 +257,6 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
       console.log(
         `  [${branch.name}] Categoría ${category.category_name}: ${products.length} productos`,
       );
-      if (products.length === 0) {
-        failedCategoryIds.add(category.id);
-      }
       for (const p of products) {
         const { externalId, productName } = extractApiFields(p);
 
@@ -320,7 +321,7 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
     );
   }
 
-  // Rubros sin informacion: se descartan TAMBIEN las filas que el sufijo del
+  // Rubros que fallaron: se descartan TAMBIEN las filas que el sufijo del
   // nombre reasigno HACIA ellos desde un rubro que si respondio. Ese rubro no
   // se resetea (conserva su foto anterior) y en las filas de grupo el stock se
   // ACUMULA (`stock = stock + $3`): sumarle productos encima del valor viejo
@@ -336,7 +337,7 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
       .map((c) => c.category_name);
     stats.preserved_categories = preservedNames;
     console.warn(
-      `  [${branch.name}] ⚠️ Rubro(s) sin datos, se CONSERVA el stock anterior: ${preservedNames.join(", ")}` +
+      `  [${branch.name}] ⚠️ Rubro(s) con error, se CONSERVA el stock anterior: ${preservedNames.join(", ")}` +
         (before > rawProducts.length
           ? ` (${before - rawProducts.length} fila(s) reasignada(s) hacia ellos descartada(s))`
           : ""),
@@ -394,8 +395,8 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
  *     RUBRO. Si viene, el reset a 0 se acota a esas categorias y los rubros
  *     ausentes CONSERVAN su stock anterior en vez de quedar en 0. null = reset
  *     total de la sucursal. El sync por API pasa null cuando respondieron todos
- *     los rubros, y la lista de los que respondieron cuando alguno fallo o vino
- *     vacio. El CSV pasa los rubros presentes en el archivo.
+ *     los rubros, y la lista de los que respondieron (aunque sea con []) cuando
+ *     alguno fallo. El CSV pasa los rubros presentes en el archivo.
  *   @param {Date|null} [opts.syncedAt] - Momento al que corresponde la FOTO de
  *     stock, que es lo que se guarda en `last_sync_at`. Por API es "ahora"
  *     (se consulta en vivo) y por eso el default es NOW(). Por CSV es la fecha
@@ -424,7 +425,7 @@ async function persistBranchStock(branch, rows, opts = {}) {
     //
     // GUARD ANTI-VACIADO POR RUBRO: con `resetCategoryIds` el reset se limita a
     // los rubros que la fuente efectivamente trajo. Un CSV manual puede traer
-    // solo los rubros con stock, y por API un rubro puede fallar o venir vacio:
+    // solo los rubros con stock, y por API un rubro puede fallar:
     // sin este recorte, ese rubro quedaria en 0 en la sucursal y lo propagaria
     // a los controles activos, commiteando "con exito".
     if (resetCategoryIds && resetCategoryIds.length > 0) {
