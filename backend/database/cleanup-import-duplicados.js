@@ -45,7 +45,7 @@ const { pool } = require("./config");
 const APPLY = process.argv.includes("--apply");
 
 // Candidatos a duplicado + todo lo que hace falta para decidir si son seguros.
-// `orig` es el producto bueno (el que tiene external_id, o el mas viejo).
+// `orig` es el producto bueno: siempre uno con external_id (el de la API).
 const SQL_DIAG = `
 WITH dup AS (
   SELECT
@@ -64,6 +64,9 @@ WITH dup AS (
     WHERE p.is_active = true
       AND p.id <> d.id
       AND p.category_id = d.category_id
+      -- El original TIENE que venir de la API. Sin esto, dos copias del CSV
+      -- sin external_id se elegian una a la otra como original y se borraban.
+      AND p.external_id IS NOT NULL
       AND EXISTS (
         SELECT 1
         FROM unnest(string_to_array(replace(p.product_code, ' ', ''), ',')) AS pc
@@ -72,8 +75,7 @@ WITH dup AS (
                AND replace(d.product_code, ' ', '') ~ '^[0-9]+$'
                AND ltrim(pc, '0') = ltrim(replace(d.product_code, ' ', ''), '0'))
       )
-    -- Mismo desempate que persistBranchStock: gana el que tiene external_id.
-    ORDER BY p.external_id NULLS LAST, p.id
+    ORDER BY p.id
     LIMIT 1
   ) o ON true
   WHERE d.is_active = true

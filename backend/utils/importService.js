@@ -141,6 +141,7 @@ async function analyzeStockCsv(content) {
   // Mismo criterio que la resolucion de identidad en persistBranchStock.
   // Y se comparan los codigos numericos sin ceros a la izquierda: la BD guarda
   // "006619" donde el CSV trae "6619". Mismo criterio que persistBranchStock.
+  // Los espacios se sacan de los dos lados ("AO ONE DAY" vs "AOONEDAY").
   const existing = await pool.query(
     `SELECT DISTINCT t.code, t.cat
      FROM UNNEST($1::text[], $2::int[]) AS t(code, cat)
@@ -149,9 +150,9 @@ async function analyzeStockCsv(content) {
       AND EXISTS (
         SELECT 1
         FROM unnest(string_to_array(replace(p.product_code, ' ', ''), ',')) AS pc
-        WHERE pc = t.code
-           OR (pc ~ '^[0-9]+$' AND t.code ~ '^[0-9]+$'
-               AND ltrim(pc, '0') = ltrim(t.code, '0'))
+        WHERE pc = replace(t.code, ' ', '')
+           OR (pc ~ '^[0-9]+$' AND replace(t.code, ' ', '') ~ '^[0-9]+$'
+               AND ltrim(pc, '0') = ltrim(replace(t.code, ' ', ''), '0'))
       )
      WHERE p.is_active = true`,
     [codes, cats],

@@ -591,15 +591,19 @@ async function persistBranchStock(branch, rows, opts = {}) {
           // (1091 productos activos tienen ceros adelante). La comparacion
           // ltrim solo se aplica cuando AMBOS lados son numericos, para no
           // tocar codigos alfanumericos como "AC2+0.50" u "ORT00430".
+          //
+          // Los espacios se sacan de AMBOS lados: si solo se sacan del campo,
+          // un codigo como "AO ONE DAY" nunca matchea y cada import crea una
+          // copia nueva (pasaron 7 copias de ACUVUE y OPTIMA).
           const existing = await client.query(
             `SELECT id FROM products
              WHERE category_id = $2 AND is_active = true
                AND EXISTS (
                  SELECT 1
                  FROM unnest(string_to_array(replace(product_code, ' ', ''), ',')) AS pc
-                 WHERE pc = $1
-                    OR (pc ~ '^[0-9]+$' AND $1 ~ '^[0-9]+$'
-                        AND ltrim(pc, '0') = ltrim($1, '0'))
+                 WHERE pc = replace($1, ' ', '')
+                    OR (pc ~ '^[0-9]+$' AND replace($1, ' ', '') ~ '^[0-9]+$'
+                        AND ltrim(pc, '0') = ltrim(replace($1, ' ', ''), '0'))
                )
              ORDER BY external_id NULLS LAST, id
              LIMIT 1`,
