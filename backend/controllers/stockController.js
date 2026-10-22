@@ -353,8 +353,9 @@ const deleteStockItem = async (req, res) => {
     }
     // Protección al reabrir un control: un ítem que ya generó una orden no se
     // puede eliminar (rompería la relación control↔orden). Se debe quitar desde
-    // la orden si corresponde.
-    if (item.ordered_at) {
+    // la orden si corresponde. Si la orden ya cerró, StockControl.delete suelta
+    // el vínculo y lo borra.
+    if (item.ordered_at || (await StockControl.hasLiveOrder(item_id))) {
       return res.status(400).json({
         status: "error",
         message: "Este ítem ya generó una orden y no se puede eliminar. Quitalo desde la orden si corresponde.",

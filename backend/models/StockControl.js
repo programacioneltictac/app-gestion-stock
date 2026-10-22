@@ -265,8 +265,45 @@ class StockControl {
     return result.rows;
   }
 
+  // true si el ítem figura en una orden que sigue en gestión (no terminal).
+  // ordered_at no alcanza: se libera al finalizar+sync, pero la línea de la
+  // orden sigue apuntando al ítem por order_details.stock_control_id.
+  static async hasLiveOrder(id) {
+    const result = await pool.query(
+      `SELECT 1
+       FROM order_details od
+       JOIN orders_controls oc ON od.order_control_id = oc.id
+       WHERE od.stock_control_id = $1
+         AND ${LIVE_RESERVATION_SQL}
+       LIMIT 1`,
+      [id]
+    );
+    return result.rows.length > 0;
+  }
+
   static async delete(id) {
-    await pool.query("DELETE FROM stock_controls WHERE id = $1", [id]);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Las órdenes cerradas (finalizadas/canceladas) conservan su línea pero
+      // sueltan el vínculo al ítem; si no, la FK de order_details impide borrarlo.
+      await client.query(
+        `UPDATE order_details od
+         SET stock_control_id = NULL
+         FROM orders_controls oc
+         WHERE od.order_control_id = oc.id
+           AND od.stock_control_id = $1
+           AND NOT (${LIVE_RESERVATION_SQL})`,
+        [id]
+      );
+      await client.query("DELETE FROM stock_controls WHERE id = $1", [id]);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   static async findWithControlInfo(id) {
