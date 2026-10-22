@@ -140,9 +140,10 @@ class BrandTrial {
   }
 
   // Conteo de pruebas vencidas sin decidir (para la alerta del dashboard).
-  static async countDue(branchId = null) {
-    const params = branchId ? [branchId] : [];
-    const branchClause = branchId ? "AND branch_id = $1" : "";
+  // branchIds: array de sucursales, o null = todas.
+  static async countDue(branchIds = null) {
+    const params = branchIds ? [branchIds] : [];
+    const branchClause = branchIds ? "AND branch_id = ANY($1::int[])" : "";
     const result = await pool.query(
       `SELECT COUNT(*) AS total
        FROM brand_trials

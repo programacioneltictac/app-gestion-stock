@@ -8,6 +8,7 @@ import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
+import LinearProgress from '@mui/material/LinearProgress';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
@@ -25,9 +26,10 @@ import SpeedIcon from '@mui/icons-material/Speed';
 import HourglassBottomIcon from '@mui/icons-material/HourglassBottom';
 import ScienceIcon from '@mui/icons-material/Science';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '../context/AuthContext';
 import { getAlerts } from '../data/alerts';
+import { getBranchesList } from '../data/branches';
 import { getSituation } from '../data/reports';
 import { generateSituationPdf } from '../utils/situationPdf';
 import PageContainer from './PageContainer';
@@ -80,25 +82,80 @@ function cycleColor(days, thresholds) {
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isStaff = user?.role === 'admin' || user?.role === 'manager';
+
+  // Filtro de sucursales (chips, solo admin/manager). Vive en la URL para que el
+  // "Volver" desde un control lo reponga: sin `branches` = todas (arranque);
+  // `branches=1,3` = esas; `branches=` vacío = ninguna. El employee no tiene
+  // chips y el backend lo limita igual a su sucursal.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const branchesParam = searchParams.get('branches');
+  const selectedBranchIds = React.useMemo(
+    () =>
+      branchesParam == null
+        ? null
+        : branchesParam.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0),
+    [branchesParam]
+  );
+  const [branches, setBranches] = React.useState([]);
+
+  React.useEffect(() => {
+    if (!isStaff) return;
+    getBranchesList()
+      .then(setBranches)
+      .catch(() => setBranches([]));
+  }, [isStaff]);
+
+  const isBranchOn = (id) => selectedBranchIds == null || selectedBranchIds.includes(id);
+
+  const setBranchFilter = React.useCallback(
+    (ids) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          // Todas encendidas = sin filtro (vuelve al estado de arranque).
+          if (ids == null || ids.length === branches.length) next.delete('branches');
+          else next.set('branches', ids.join(','));
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [branches.length, setSearchParams]
+  );
+
+  const handleToggleBranch = (id) => {
+    const current = selectedBranchIds ?? branches.map((b) => b.id);
+    setBranchFilter(current.includes(id) ? current.filter((b) => b !== id) : [...current, id]);
+  };
 
   const [data, setData] = React.useState(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
 
+  // Cada cambio de chips dispara una carga; si llegan respuestas fuera de orden
+  // (clics rápidos), solo se aplica la de la última selección.
+  const requestRef = React.useRef(0);
   const load = React.useCallback(async () => {
+    const requestId = ++requestRef.current;
     setError(null);
     setIsLoading(true);
     try {
-      setData(await getAlerts());
+      const result = await getAlerts(selectedBranchIds);
+      if (requestId === requestRef.current) setData(result);
     } catch (err) {
-      setError(err);
+      if (requestId === requestRef.current) setError(err);
     }
-    setIsLoading(false);
-  }, []);
+    if (requestId === requestRef.current) setIsLoading(false);
+  }, [selectedBranchIds]);
 
   React.useEffect(() => {
     load();
   }, [load]);
+
+  // Destino del "Volver" de los controles: el dashboard con el mismo filtro.
+  const backTo = `/${location.search}`;
 
   // Descarga del informe de situación. Los datos se piden recién al hacer clic
   // (son 11 consultas): no tiene sentido cargarlos con el dashboard si el
@@ -129,7 +186,9 @@ export default function Dashboard() {
     };
   }, [data]);
 
-  if (isLoading) {
+  // Spinner de página completa solo en la primera carga; al cambiar los chips
+  // se mantienen los datos anteriores con una barra de progreso arriba.
+  if (isLoading && !data) {
     return (
       <PageContainer title="Dashboard" breadcrumbs={[{ title: 'Dashboard' }]}>
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 6 }}>
@@ -183,6 +242,34 @@ export default function Dashboard() {
           {isDownloading ? 'Generando…' : 'Descargar informe'}
         </Button>
       </Box>
+
+      {/* Filtro de sucursales: chip encendido = se incluye. "Todas" repone el
+          estado de arranque. Solo admin/manager. */}
+      {isStaff && branches.length > 0 && (
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center" sx={{ mb: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mr: 0.5 }}>
+            Sucursales:
+          </Typography>
+          <Chip
+            label="Todas"
+            size="small"
+            color="primary"
+            variant={selectedBranchIds == null ? 'filled' : 'outlined'}
+            onClick={() => setBranchFilter(null)}
+          />
+          {branches.map((b) => (
+            <Chip
+              key={b.id}
+              label={b.name}
+              size="small"
+              color="primary"
+              variant={isBranchOn(b.id) ? 'filled' : 'outlined'}
+              onClick={() => handleToggleBranch(b.id)}
+            />
+          ))}
+        </Stack>
+      )}
+      <Box sx={{ height: 4, mb: 1 }}>{isLoading && <LinearProgress />}</Box>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error.message}</Alert>}
       {reportError && (
@@ -310,7 +397,7 @@ export default function Dashboard() {
                 {data.muyPrioritarios.map((r) => (
                   <ListItemButton
                     key={`mp-${r.controlId}`}
-                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?filter=muyprioritario`, { state: { backTo: '/' } })}
+                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?filter=muyprioritario`, { state: { backTo } })}
                   >
                     <ListItemText primary={`${r.branchName} — ${r.categoryName}`} />
                     <Stack direction="row" spacing={1} alignItems="center">
@@ -343,7 +430,7 @@ export default function Dashboard() {
                 {data.overstockBranches.map((r) => (
                   <ListItemButton
                     key={`ov-${r.controlId}`}
-                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?filter=overstock`, { state: { backTo: '/' } })}
+                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?filter=overstock`, { state: { backTo } })}
                   >
                     <ListItemText primary={`${r.branchName} — ${r.categoryName}`} />
                     <Stack direction="row" spacing={1} alignItems="center">
@@ -376,7 +463,7 @@ export default function Dashboard() {
                 {data.discontinuedValue.map((r) => (
                   <ListItemButton
                     key={`dv-${r.controlId}`}
-                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?tab=discontinued`, { state: { backTo: '/' } })}
+                    onClick={() => navigate(`/stock-control/${r.branchId}/control/${r.controlId}?tab=discontinued`, { state: { backTo } })}
                   >
                     <ListItemText primary={`${r.branchName} — ${r.categoryName}`} />
                     <Stack direction="row" spacing={1} alignItems="center">

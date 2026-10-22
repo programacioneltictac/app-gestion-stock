@@ -1,8 +1,9 @@
 import alertService from '../services/alertService';
 
 // Métricas de alertas tempranas, transformadas a camelCase para el dashboard.
-export async function getAlerts() {
-  const data = await alertService.getAlerts();
+// branchIds: filtro de sucursales (chips del dashboard), o null = todas.
+export async function getAlerts(branchIds = null) {
+  const data = await alertService.getAlerts(branchIds);
   return {
     muyPrioritarios: (data.muyPrioritarios || []).map((r) => ({
       controlId: r.control_id,

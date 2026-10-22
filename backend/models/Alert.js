@@ -13,17 +13,18 @@ const OVERSTOCK_STATUS_ID = 3;
 
 class Alert {
   /**
-   * Métricas de alertas tempranas. `branchId` opcional: si viene (employee),
-   * limita todo a esa sucursal; si es null (admin/manager), abarca todas.
+   * Métricas de alertas tempranas. `branchIds` opcional: si viene (employee =
+   * su sucursal, o el filtro de chips del dashboard), limita todo a esas
+   * sucursales; si es null, abarca todas.
    * Considera controles ACTIVOS (draft + completed) e ítems no pedidos; los
    * 'discontinued' quedan fuera (están apagados a propósito).
    * @returns {Promise<object>} { muyPrioritarios, criticalBranches, overstockBranches,
    *   pendingOrders, authorizedOrders, cycleTime*Days, closedOrders*,
    *   avgCompliance, brandTrialsDue, discontinuedValue }
    */
-  static async getSummary(branchId = null) {
-    const branchClause = branchId ? "AND mc.branch_id = $1" : "";
-    const params = branchId ? [branchId] : [];
+  static async getSummary(branchIds = null) {
+    const branchClause = branchIds ? "AND mc.branch_id = ANY($1::int[])" : "";
+    const params = branchIds ? [branchIds] : [];
 
     // 1) Faltantes MUY PRIORITARIOS por sucursal+rubro (estado generar_pedido,
     //    no pedidos, en controles activos draft+completed). Navega al control puntual.
@@ -105,7 +106,7 @@ class Alert {
 
     // 3) Órdenes pendientes (status = 'pending'), separadas por tipo:
     //    external = a proveedor, internal = a Nodo Hub. Para employee, de su sucursal.
-    const ordersBranchClause = branchId ? "AND oc.branch_id = $1" : "";
+    const ordersBranchClause = branchIds ? "AND oc.branch_id = ANY($1::int[])" : "";
     const pendingOrders = await pool.query(
       `SELECT
          COUNT(*)                                              AS total,
@@ -213,7 +214,7 @@ class Alert {
     );
 
     // 6) Marcas a prueba vencidas sin decidir (pendientes de evaluación).
-    const brandTrialsDue = await BrandTrial.countDue(branchId);
+    const brandTrialsDue = await BrandTrial.countDue(branchIds);
 
     const cycle = cycleTime.rows[0] || {};
     return {
