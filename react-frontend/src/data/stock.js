@@ -137,15 +137,24 @@ export async function getStockItems(controlId) {
 
 // Productos DISCONTINUOS del control: con stock en la sucursal, del mismo rubro,
 // NO incluidos en el control. Solo lectura (para detectar sobrante).
+const mapStockOnlyProduct = (p) => ({
+  id: p.product_stock_id,
+  displayName: p.display_name,
+  stock: Number(p.stock || 0),
+  avgCost: Number(p.avg_cost || 0),
+  categoryName: p.category_name || "",
+});
+
 export async function getDiscontinuedProducts(controlId) {
   const data = await stockService.getDiscontinued(controlId);
-  return (data.products || []).map((p) => ({
-    id: p.product_stock_id,
-    displayName: p.display_name,
-    stock: Number(p.stock || 0),
-    avgCost: Number(p.avg_cost || 0),
-    categoryName: p.category_name || "",
-  }));
+  return (data.products || []).map(mapStockOnlyProduct);
+}
+
+// Productos PROMO del control: con stock en la sucursal y del mismo rubro. No se
+// reponen ni cuentan como discontinuos. Mismo formato que los discontinuos.
+export async function getPromoProducts(controlId) {
+  const data = await stockService.getPromo(controlId);
+  return (data.products || []).map(mapStockOnlyProduct);
 }
 
 // Agrega/actualiza un ítem del control. `ref` identifica el producto:

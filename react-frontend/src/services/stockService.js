@@ -19,6 +19,10 @@ class StockService {
     return apiClient.get(`/stock/monthly-control/${controlId}/discontinued`);
   }
 
+  async getPromo(controlId) {
+    return apiClient.get(`/stock/monthly-control/${controlId}/promo`);
+  }
+
   async completeControl(controlId) {
     return apiClient.put('/stock/monthly-control/complete', { control_id: controlId });
   }

@@ -38,6 +38,7 @@ import {
   getConditions,
   getControlById,
   getDiscontinuedProducts,
+  getPromoProducts,
 } from "../data/stock";
 import { createOrderFromControl } from "../data/orders";
 import { exportStockControlToExcel } from "../utils/stockControlExcel";
@@ -133,12 +134,13 @@ export default function StockControlShow() {
   const [selectionModel, setSelectionModel] = React.useState([]);
   const [isGenerating, setIsGenerating] = React.useState(false);
 
-  // Tab activa: 'control' (la tabla del control) | 'discontinued' (solo lectura).
-  // Vive en la URL (?tab=discontinued) para que sobreviva a una recarga y para
+  // Tab activa: 'control' (la tabla del control) | 'discontinued' | 'promo'
+  // (ambas solo lectura). Vive en la URL (?tab=discontinued) para que sobreviva a una recarga y para
   // que el "Volver" de la lista de controles pueda restituirla. También es el
   // acceso directo desde el dashboard (tarjeta de stock discontinuo).
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get("tab") === "discontinued" ? "discontinued" : "control";
+  const tabParam = searchParams.get("tab");
+  const activeTab = tabParam === "discontinued" || tabParam === "promo" ? tabParam : "control";
 
   // Filtro de llegada desde el dashboard. TODOS los modos se traducen a chips
   // encendidos (ninguno es un modo aparte con banner), para que los accesos
@@ -232,6 +234,10 @@ export default function StockControlShow() {
   const [discLoaded, setDiscLoaded] = React.useState(false);
   const [isLoadingDisc, setIsLoadingDisc] = React.useState(false);
 
+  const [promo, setPromo] = React.useState([]);
+  const [promoLoaded, setPromoLoaded] = React.useState(false);
+  const [isLoadingPromo, setIsLoadingPromo] = React.useState(false);
+
   const loadData = React.useCallback(async () => {
     setError(null);
     setIsLoading(true);
@@ -282,6 +288,23 @@ export default function StockControlShow() {
     }
   }, [controlId, notifications]);
 
+  // Carga (lazy) de productos PROMO: solo la primera vez que se entra a la tab.
+  const loadPromo = React.useCallback(async () => {
+    setIsLoadingPromo(true);
+    try {
+      const data = await getPromoProducts(Number(controlId));
+      setPromo(data);
+      setPromoLoaded(true);
+    } catch (err) {
+      notifications.show(`Error al cargar promo: ${err.message}`, {
+        severity: "error",
+        autoHideDuration: 4000,
+      });
+    } finally {
+      setIsLoadingPromo(false);
+    }
+  }, [controlId, notifications]);
+
   const handleChangeTab = React.useCallback((_, val) => {
     setSearchParams(
       (prev) => {
@@ -292,12 +315,14 @@ export default function StockControlShow() {
       { replace: true }
     );
     if (val === "discontinued" && !discLoaded) loadDiscontinued();
-  }, [discLoaded, loadDiscontinued, setSearchParams]);
+    if (val === "promo" && !promoLoaded) loadPromo();
+  }, [discLoaded, loadDiscontinued, promoLoaded, loadPromo, setSearchParams]);
 
-  // Si se entró directo en la tab de discontinuos (?tab=discontinued), dispara la
+  // Si se entró directo en la tab de discontinuos o promo (?tab=...), dispara la
   // carga lazy una vez al montar.
   React.useEffect(() => {
     if (activeTab === "discontinued" && !discLoaded) loadDiscontinued();
+    if (activeTab === "promo" && !promoLoaded) loadPromo();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -651,7 +676,7 @@ export default function StockControlShow() {
     [control, handleDeleteItem, handleEditItem, isAdmin]
   );
 
-  // Columnas de la tabla de discontinuos (solo lectura): Producto, Rubro,
+  // Columnas de las tablas de discontinuos y promo (solo lectura): Producto, Rubro,
   // Stock, Costo unit., Total valorizado (= stock * costo unit.).
   const discontinuedColumns = React.useMemo(
     () => [
@@ -949,7 +974,7 @@ export default function StockControlShow() {
         </Stack>
       )}
 
-      {/* Tabs: control (tabla editable) vs discontinuos (sobrante, solo lectura) */}
+      {/* Tabs: control (tabla editable) vs discontinuos (sobrante) y promo (solo lectura) */}
       <Tabs
         value={activeTab}
         onChange={handleChangeTab}
@@ -960,6 +985,7 @@ export default function StockControlShow() {
           value="discontinued"
           label={discLoaded ? `Discontinuos (${discontinued.length})` : "Discontinuos"}
         />
+        <Tab value="promo" label={promoLoaded ? `Promo (${promo.length})` : "Promo"} />
       </Tabs>
 
       {activeTab === "discontinued" ? (
@@ -973,6 +999,23 @@ export default function StockControlShow() {
             columns={discontinuedColumns}
             disableRowSelectionOnClick
             loading={isLoadingDisc}
+            autoHeight
+            pageSizeOptions={[25, 50, 100]}
+            initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+            sx={dataGridSx}
+          />
+        </Box>
+      ) : activeTab === "promo" ? (
+        <Box sx={{ flex: 1, width: "100%" }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Productos PROMO con stock de este rubro. No se reponen ni cuentan como
+            discontinuos. Solo visualización.
+          </Typography>
+          <DataGrid
+            rows={promo}
+            columns={discontinuedColumns}
+            disableRowSelectionOnClick
+            loading={isLoadingPromo}
             autoHeight
             pageSizeOptions={[25, 50, 100]}
             initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}

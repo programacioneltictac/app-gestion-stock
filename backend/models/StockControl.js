@@ -370,8 +370,41 @@ class StockControl {
              AND bt.brand_id = COALESCE(pg.brand_id, p.brand_id)
              AND (bt.category_id IS NULL OR bt.category_id = $2)
          )
+         -- Excluir productos PROMO: no se reponen ni van al control; se ven
+         -- aparte en la pestaña PROMO (findPromo).
+         AND NOT COALESCE(p.is_promo, false)
        ORDER BY psb.display_name`,
       [branchId, categoryId, monthlyControlId]
+    );
+    return result.rows;
+  }
+
+  /**
+   * Productos PROMO (products.is_promo) con stock en la sucursal y del MISMO
+   * rubro del control. Mismas columnas que findDiscontinued. Solo lectura.
+   * @param {number} branchId    sucursal del control
+   * @param {number} categoryId  rubro del control
+   */
+  static async findPromo(branchId, categoryId) {
+    const result = await pool.query(
+      `SELECT
+         psb.id                                       AS product_stock_id,
+         psb.display_name,
+         psb.stock,
+         COALESCE(psb.avg_cost, 0)                    AS avg_cost,
+         COALESCE(c.category_name, pg.category_type)  AS category_name
+       FROM product_stock_by_branch psb
+       JOIN products            p  ON psb.product_id = p.id
+       LEFT JOIN categories     c  ON p.category_id  = c.id
+       LEFT JOIN product_groups pg ON psb.group_id   = pg.id
+       LEFT JOIN categories     cg ON pg.category_type = cg.category_name
+       WHERE psb.branch_id = $1
+         AND psb.display_name IS NOT NULL
+         AND psb.stock > 0
+         AND p.is_promo
+         AND ( p.category_id = $2 OR cg.id = $2 )
+       ORDER BY psb.display_name`,
+      [branchId, categoryId]
     );
     return result.rows;
   }

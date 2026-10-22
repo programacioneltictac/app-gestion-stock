@@ -141,6 +141,8 @@ class Report {
                AND bt.brand_id = COALESCE(pg.brand_id, p.brand_id)
                AND (bt.category_id IS NULL OR bt.category_id = mc.category_id)
            )
+           -- Excluir productos PROMO (se ven aparte), igual que findDiscontinued.
+           AND NOT COALESCE(p.is_promo, false)
            ${mcBranch}
          GROUP BY mc.branch_id, b.name
          HAVING SUM(psb.stock * ${COST_EXPR}) > 0

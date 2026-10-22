@@ -36,6 +36,10 @@ router.get("/monthly-control/history", stockController.getMonthlyControlHistory)
 // genérica :control_id para que no la capture.
 router.get("/monthly-control/:control_id/discontinued", stockController.getDiscontinued);
 
+// GET /api/stock/monthly-control/:control_id/promo — productos PROMO con stock
+// del mismo rubro (solo lectura; no cuentan como discontinuos).
+router.get("/monthly-control/:control_id/promo", stockController.getPromo);
+
 // GET /api/stock/monthly-control/:control_id/open-orders-count — cantidad de
 // órdenes abiertas vinculadas (para avisar antes de discontinuar).
 router.get("/monthly-control/:control_id/open-orders-count", stockController.getOpenOrdersCount);
