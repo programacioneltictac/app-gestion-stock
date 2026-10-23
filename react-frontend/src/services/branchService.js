@@ -13,6 +13,15 @@ class BranchService {
     return apiClient.get('/stock/branches-list');
   }
 
+  // Administración: todas las sucursales (activas e inactivas) con sus bloqueos
+  async getAdminList() {
+    return apiClient.get('/branches/admin');
+  }
+
+  async setActive(branchId, isActive) {
+    return apiClient.put(`/branches/${branchId}/active`, { is_active: isActive });
+  }
+
   async getOne(branchId) {
     return apiClient.get(`/branches/${branchId}`);
   }

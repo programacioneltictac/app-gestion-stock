@@ -16,6 +16,22 @@ router.get(
   branchController.getAllBranches
 );
 
+// GET /api/branches/admin — todas (activas e inactivas) con bloqueos (solo admin)
+router.get(
+  "/admin",
+  authenticateToken,
+  requireRole("admin"),
+  branchController.getAdminList
+);
+
+// PUT /api/branches/:id/active — desactivar/reactivar (solo admin)
+router.put(
+  "/:id/active",
+  authenticateToken,
+  requireRole("admin"),
+  branchController.setActive
+);
+
 // GET /api/branches/my-branch
 router.get("/my-branch", authenticateToken, branchController.getMyBranch);
 

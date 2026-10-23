@@ -36,6 +36,26 @@ export async function getMyBranch() {
   }
 }
 
+// Evento global para que el sidebar recargue sus sucursales tras activar/desactivar.
+export const BRANCHES_CHANGED_EVENT = 'branches-changed';
+
+// Administración → Sucursales: todas, con lo que bloquea desactivarlas.
+export async function getAdminBranches() {
+  const data = await branchService.getAdminList();
+  return (data.branches || []).map((b) => ({
+    ...transformBranchFromBackend(b),
+    apiBranchCode: b.api_branch_code || '',
+    activeControls: Number(b.active_controls || 0),
+    activeOrders: Number(b.active_orders || 0),
+    usersCount: Number(b.users_count || 0),
+  }));
+}
+
+export async function setBranchActive(branchId, isActive) {
+  await branchService.setActive(branchId, isActive);
+  window.dispatchEvent(new Event(BRANCHES_CHANGED_EVENT));
+}
+
 export async function getBranchesList() {
   try {
     const data = await branchService.getBranchesList();

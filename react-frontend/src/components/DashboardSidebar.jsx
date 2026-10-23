@@ -33,7 +33,7 @@ import {
 } from "../mixins";
 import { thinScrollbarSx } from "../utils/scrollStyles";
 import { useAuth } from "../context/AuthContext";
-import { getBranchesList } from "../data/branches";
+import { getBranchesList, BRANCHES_CHANGED_EVENT } from "../data/branches";
 
 function DashboardSidebar({
   expanded = true,
@@ -60,6 +60,9 @@ function DashboardSidebar({
       }
     };
     loadBranches();
+    // Recarga al activar/desactivar una sucursal desde Administración → Sucursales
+    window.addEventListener(BRANCHES_CHANGED_EVENT, loadBranches);
+    return () => window.removeEventListener(BRANCHES_CHANGED_EVENT, loadBranches);
   }, []);
 
   const isOverSmViewport = useMediaQuery(theme.breakpoints.up("sm"));
@@ -263,6 +266,13 @@ function DashboardSidebar({
                   icon={<LocalShippingIcon />}
                   href="/suppliers"
                   selected={!!matchPath("/suppliers/*", pathname)}
+                />
+                <DashboardSidebarPageItem
+                  id="branches-admin"
+                  title="Sucursales"
+                  icon={<StoreIcon />}
+                  href="/branches"
+                  selected={!!matchPath("/branches/*", pathname)}
                 />
                 <DashboardSidebarPageItem
                   id="users"

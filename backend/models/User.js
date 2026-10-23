@@ -5,7 +5,7 @@ class User {
   static async findByUsername(username) {
     const result = await pool.query(
       `SELECT u.id, u.username, u.password_hash, u.role, u.branch_id, u.is_active,
-              b.name AS branch_name, b.code AS branch_code
+              b.name AS branch_name, b.code AS branch_code, b.is_active AS branch_active
        FROM users u
        LEFT JOIN branches b ON u.branch_id = b.id
        WHERE u.username = $1 AND u.is_active = true`,

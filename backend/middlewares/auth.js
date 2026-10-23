@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const Branch = require("../models/Branch");
 
 // JWT_SECRET debe estar definido en variables de entorno
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -24,7 +25,20 @@ const authenticateToken = (req, res, next) => {
         .json({ status: "error", message: "Token inválido o expirado" });
     }
     req.user = user;
-    next();
+
+    // Employee con sesión abierta cuya sucursal se desactivó: se corta la sesión
+    // (401 → el front vuelve al login, que explica el motivo).
+    if (user.role !== "employee" || !user.branch_id) return next();
+    Branch.isInactive(user.branch_id)
+      .then((inactive) => {
+        if (inactive) {
+          return res
+            .status(401)
+            .json({ status: "error", message: "Tu sucursal está desactivada" });
+        }
+        next();
+      })
+      .catch(next);
   });
 };
 

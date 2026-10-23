@@ -78,9 +78,71 @@ const getBranchesList = async (req, res) => {
   }
 };
 
+// GET /api/branches/admin — todas las sucursales con sus bloqueos (solo admin)
+const getAdminList = async (req, res) => {
+  try {
+    const branches = await Branch.findAllAdmin();
+    res.json({ status: "success", branches });
+  } catch (error) {
+    handleControllerError(res, error, "Error obteniendo sucursales (admin):");
+  }
+};
+
+// PUT /api/branches/:id/active { is_active } — desactivar/reactivar (solo admin).
+// Desactivar solo si no es el Hub y no tiene controles ni órdenes activas.
+const setActive = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { is_active } = req.body;
+
+    if (typeof is_active !== "boolean") {
+      return res.status(400).json({ status: "error", message: "is_active debe ser true o false" });
+    }
+
+    const branch = await Branch.findAdminById(id);
+    if (!branch) {
+      return res.status(404).json({ status: "error", message: "Sucursal no encontrada" });
+    }
+
+    if (!is_active) {
+      if (branch.is_hub) {
+        return res.status(400).json({
+          status: "error",
+          message: "El Nodo Hub no se puede desactivar: lo usan las órdenes internas",
+        });
+      }
+      const blockers = [];
+      if (branch.active_controls > 0) blockers.push(`${branch.active_controls} control(es) activo(s)`);
+      if (branch.active_orders > 0) blockers.push(`${branch.active_orders} orden(es) activa(s)`);
+      if (blockers.length > 0) {
+        return res.status(400).json({
+          status: "error",
+          message: `No se puede desactivar ${branch.name}: tiene ${blockers.join(" y ")}`,
+        });
+      }
+    }
+
+    const updated = await Branch.setActive(id, is_active);
+
+    console.log(
+      `Sucursal ${is_active ? "reactivada" : "desactivada"} - ${updated.name} (ID ${id}), Usuario: ${req.user.username}`
+    );
+
+    res.json({
+      status: "success",
+      data: updated,
+      message: `Sucursal ${is_active ? "reactivada" : "desactivada"}`,
+    });
+  } catch (error) {
+    handleControllerError(res, error, "Error cambiando estado de sucursal:");
+  }
+};
+
 module.exports = {
   getAllBranches,
   getMyBranch,
   getBranchesList,
   updateApiCodes,
+  getAdminList,
+  setActive,
 };

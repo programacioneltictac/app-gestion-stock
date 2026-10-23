@@ -26,6 +26,15 @@ const login = async (req, res) => {
         .json({ status: "error", message: "Credenciales inválidas" });
     }
 
+    // Employee de una sucursal desactivada (Administración → Sucursales): sin acceso
+    // hasta que se reactive. Admin/manager no dependen de su sucursal.
+    if (user.role === "employee" && user.branch_id && user.branch_active === false) {
+      return res.status(403).json({
+        status: "error",
+        message: "Tu sucursal está desactivada. Consultá con un administrador.",
+      });
+    }
+
     const payload = {
       id: user.id,
       username: user.username,
