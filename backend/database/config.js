@@ -19,6 +19,13 @@ const pool = new Pool(
       }
 );
 
+// Un cliente inactivo del pool puede emitir 'error' (ej. la BD corta la
+// conexión). Sin listener, Node lo trata como excepción no capturada y tumba el
+// proceso; el pool descarta ese cliente y abre otro en el próximo query.
+pool.on("error", (err) => {
+  console.error("❌ Error en cliente inactivo del pool de PostgreSQL:", err.message);
+});
+
 // Función para testear la conexión
 const testConnection = async () => {
   try {

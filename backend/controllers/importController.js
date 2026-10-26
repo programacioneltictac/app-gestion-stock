@@ -1,6 +1,6 @@
 const { analyzeStockCsv, importStockCsv } = require("../utils/importService");
 const { handleControllerError } = require("../utils/errorHelper");
-const { getSyncRunStatus } = require("../utils/scheduler");
+const { runExclusive, respondBusy } = require("../utils/syncLock");
 
 // Errores del parseo/validacion que son culpa del archivo, no del servidor:
 // se responden 400 con el mensaje tal cual para que el usuario sepa que corregir.
@@ -35,26 +35,6 @@ const getCsvBuffer = (req) => {
   return null;
 };
 
-/**
- * Corta el pedido con 409 si el sync automatico esta corriendo.
- * Import y sync hacen lo mismo (resetear stock y re-acumular): si corren a la
- * vez se pisan. Mismo criterio que syncController.
- */
-const rejectIfSyncRunning = (res) => {
-  const status = getSyncRunStatus();
-  if (!status.running) return false;
-
-  console.warn(
-    `[import-csv] Pedido rechazado: sync automatico en curso (${status.elapsedText}).`,
-  );
-  res.status(409).json({
-    status: "busy",
-    message: `Sync automatico en curso (${status.elapsedText}). Esperá ~${status.remainingMin} min y volvé a intentar.`,
-    ...status,
-  });
-  return true;
-};
-
 // POST /api/import/stock/preview — analiza el CSV SIN escribir en la BD
 const previewStockCsv = async (req, res) => {
   try {
@@ -77,8 +57,6 @@ const previewStockCsv = async (req, res) => {
 // POST /api/import/stock — importa el CSV a la BD (paso 2, tras confirmar)
 const commitStockCsv = async (req, res) => {
   try {
-    if (rejectIfSyncRunning(res)) return;
-
     const buf = getCsvBuffer(req);
     if (!buf || buf.length === 0) {
       return res
@@ -91,12 +69,16 @@ const commitStockCsv = async (req, res) => {
     // equivocado despues de confirmar).
     const expectedBranchId = req.query.branch_id || req.get("X-Branch-Id");
 
-    console.log(
-      `[import-csv] Importacion iniciada por: ${req.user.username}${expectedBranchId ? ` (sucursal esperada ${expectedBranchId})` : ""}`,
-    );
-
-    const result = await importStockCsv(buf, { expectedBranchId });
-    res.json({ status: "success", ...result });
+    // Import y sync hacen lo mismo (resetear stock y re-acumular): si corren a
+    // la vez se pisan, por eso comparten el lock.
+    const run = await runExclusive(`import CSV de ${req.user.username}`, () => {
+      console.log(
+        `[import-csv] Importacion iniciada por: ${req.user.username}${expectedBranchId ? ` (sucursal esperada ${expectedBranchId})` : ""}`,
+      );
+      return importStockCsv(buf, { expectedBranchId });
+    });
+    if (run.busy) return respondBusy(res, run.status, "[import-csv]");
+    res.json({ status: "success", ...run.result });
   } catch (error) {
     if (respondUserError(res, error)) return;
     handleControllerError(res, error, "Error importando el CSV de stock:");

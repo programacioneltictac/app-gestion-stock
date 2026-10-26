@@ -1,5 +1,18 @@
 const User = require("../models/User");
 const { handleControllerError } = require("../utils/errorHelper");
+const { getUsernameError, getPasswordError, isValidRole } = require("../middlewares/validation");
+
+/**
+ * Mismas reglas que el login: un usuario creado fuera de ellas nunca podría
+ * iniciar sesión. En la edición la contraseña es opcional (vacía = no cambia).
+ */
+const getUserFieldsError = ({ username, password, role }) => {
+  if (typeof username !== "string" || (password && typeof password !== "string")) {
+    return "Usuario y contraseña deben ser texto";
+  }
+  if (!isValidRole(role)) return "Rol inválido. Debe ser: admin, manager o employee";
+  return getUsernameError(username.trim()) || (password ? getPasswordError(password) : null);
+};
 
 // GET /api/users
 const getAllUsers = async (req, res) => {
@@ -47,6 +60,11 @@ const createUser = async (req, res) => {
         status: "error",
         message: "Usuario, contraseña y rol son requeridos",
       });
+    }
+
+    const fieldsError = getUserFieldsError(req.body);
+    if (fieldsError) {
+      return res.status(400).json({ status: "error", message: fieldsError });
     }
 
     // Verificar si el usuario ya existe
@@ -97,6 +115,11 @@ const updateUser = async (req, res) => {
         status: "error",
         message: "Usuario y rol son requeridos",
       });
+    }
+
+    const fieldsError = getUserFieldsError(req.body);
+    if (fieldsError) {
+      return res.status(400).json({ status: "error", message: fieldsError });
     }
 
     // Si se cambió el username, verificar que no esté en uso

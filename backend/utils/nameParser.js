@@ -210,6 +210,7 @@ function detectBrandInName(productName, brands) {
 }
 
 module.exports = {
+  escapeRegex,
   parseProductName,
   detectGroup,
   detectBrandInName,

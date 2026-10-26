@@ -1,6 +1,6 @@
 const axios = require("axios");
 const { pool } = require("../database/config");
-const { detectBrandInName } = require("./nameParser");
+const { detectBrandInName, escapeRegex } = require("./nameParser");
 
 /**
  * Servicio de sincronización con la API de COMPRAS a proveedores de IDUO.
@@ -167,13 +167,16 @@ async function syncCompras(opts = {}) {
   const kwResult = await pool.query(
     "SELECT name_keywords FROM categories WHERE name_keywords IS NOT NULL",
   );
-  const rubroKeywords = kwResult.rows
+  // Regex compiladas UNA vez por corrida (antes: una por keyword por fila) y con
+  // el keyword escapado: un "(" o "+" en name_keywords tiraba la transacción.
+  const rubroPatterns = kwResult.rows
     .flatMap((r) => r.name_keywords || [])
     .map((k) => k.toUpperCase())
-    .sort((a, b) => b.length - a.length); // más largos primero
+    .sort((a, b) => b.length - a.length) // más largos primero
+    .map((kw) => new RegExp(`\\b${escapeRegex(kw)}\\s*$`, "i"));
   const endsWithRubro = (name) => {
     const upper = name.toUpperCase().trim();
-    return rubroKeywords.some((kw) => new RegExp(`\\b${kw}\\s*$`, "i").test(upper));
+    return rubroPatterns.some((re) => re.test(upper));
   };
 
   const report = {

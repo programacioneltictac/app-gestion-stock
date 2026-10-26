@@ -32,6 +32,14 @@ function parseCost(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// Argentina usa UTC-3 fijo (sin horario de verano desde 2009).
+const ARGENTINA_UTC_OFFSET = "-03:00";
+
+/** Arma la fecha del header ("dd/mm/aaaa hh:mm:ss") como hora de Argentina. */
+function parseArgentinaDate([, day, month, year, hours, minutes, seconds]) {
+  return new Date(`${year}-${month}-${day}T${hours}:${minutes}:${seconds}${ARGENTINA_UTC_OFFSET}`);
+}
+
 /**
  * Detecta si un codigo fue destruido por Excel al convertirlo a notacion
  * cientifica ("3,10119E+11"). Es un daño IRREVERSIBLE: el codigo original
@@ -85,16 +93,9 @@ function parseStockCsv(content) {
   const dateMatch = headerBlock.match(
     /Fecha\s*:\s*(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/i,
   );
-  const exportedAt = dateMatch
-    ? new Date(
-        Number(dateMatch[3]),
-        Number(dateMatch[2]) - 1,
-        Number(dateMatch[1]),
-        Number(dateMatch[4]),
-        Number(dateMatch[5]),
-        Number(dateMatch[6]),
-      )
-    : null;
+  // La hora del header es hora de Argentina. Antes se armaba con la zona del
+  // SERVIDOR: en Render (UTC) un export de las 13:32 quedaba como 10:32 ART.
+  const exportedAt = dateMatch ? parseArgentinaDate(dateMatch) : null;
 
   // --- Filas ---
   const rows = [];

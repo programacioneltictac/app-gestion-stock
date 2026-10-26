@@ -27,3 +27,7 @@ test("extractApiFields tolera producto sin unidades", () => {
 test("extractApiFields nunca devuelve stock negativo", () => {
   assert.equal(extractApiFields({ unidades: [{ stock: "-4" }] }).stock, 0);
 });
+
+test("extractApiFields convierte un stock no numerico en 0", () => {
+  assert.equal(extractApiFields({ unidades: [{ stock: "abc" }] }).stock, 0);
+});

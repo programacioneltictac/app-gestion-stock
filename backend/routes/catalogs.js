@@ -21,10 +21,10 @@ router.get("/brands/list", catalogController.getBrandsList);
 // POST /api/stock/catalogs/brands - alta de marca (solo admin)
 router.post("/brands", requireRole("admin"), catalogController.createBrand);
 
-// PATCH /api/stock/catalogs/brands/:id/is-groupable
-router.patch("/brands/:id/is-groupable", catalogController.updateBrandIsGroupable);
+// PATCH /api/stock/catalogs/brands/:id/is-groupable (solo admin)
+router.patch("/brands/:id/is-groupable", requireRole("admin"), catalogController.updateBrandIsGroupable);
 
-// PATCH /api/stock/catalogs/brands/:id/supplier
-router.patch("/brands/:id/supplier", catalogController.updateBrandSupplier);
+// PATCH /api/stock/catalogs/brands/:id/supplier (solo admin)
+router.patch("/brands/:id/supplier", requireRole("admin"), catalogController.updateBrandSupplier);
 
 module.exports = router;

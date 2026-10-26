@@ -1,36 +1,17 @@
 const { syncAllBranches, syncBranch } = require("../utils/syncService");
 const { pool } = require("../database/config");
 const { handleControllerError } = require("../utils/errorHelper");
-const { getSyncRunStatus } = require("../utils/scheduler");
-
-/**
- * Corta el pedido con 409 si el sync automático está corriendo.
- * Sin esto el sync manual arrancaría EN PARALELO con el del cron: ambos hacen
- * "UPDATE stock=0 + re-acumular desde IDUO" y se pisarían. Devuelve true si ya
- * respondió (el caller debe cortar).
- */
-const rejectIfSyncRunning = (res) => {
-  const status = getSyncRunStatus();
-  if (!status.running) return false;
-
-  console.warn(
-    `[sync] Pedido manual rechazado: sync automático en curso (${status.elapsedText}).`,
-  );
-  res.status(409).json({
-    status: "busy",
-    message: `Sync automático en curso (${status.elapsedText}). Esperá ~${status.remainingMin} min y volvé a intentar.`,
-    ...status,
-  });
-  return true;
-};
+const { runExclusive, respondBusy } = require("../utils/syncLock");
 
 // POST /api/sync/all  — sincroniza todas las sucursales configuradas
 const syncAll = async (req, res) => {
   try {
-    if (rejectIfSyncRunning(res)) return;
-    console.log(`Sync iniciado por usuario: ${req.user.username}`);
-    const result = await syncAllBranches();
-    res.json({ status: "success", ...result });
+    const run = await runExclusive(`manual de ${req.user.username}`, () => {
+      console.log(`Sync iniciado por usuario: ${req.user.username}`);
+      return syncAllBranches();
+    });
+    if (run.busy) return respondBusy(res, run.status, "[sync]");
+    res.json({ status: "success", ...run.result });
   } catch (error) {
     handleControllerError(res, error, "Error en sincronización completa:");
   }
@@ -39,7 +20,6 @@ const syncAll = async (req, res) => {
 // POST /api/sync/branch/:branch_id  — sincroniza una sucursal específica
 const syncOneBranch = async (req, res) => {
   try {
-    if (rejectIfSyncRunning(res)) return;
     const { branch_id } = req.params;
 
     const branchResult = await pool.query(
@@ -60,13 +40,16 @@ const syncOneBranch = async (req, res) => {
       });
     }
 
-    console.log(`Sync de sucursal ${branch.name} iniciado por: ${req.user.username}`);
-    const stats = await syncBranch(branch);
+    const run = await runExclusive(`manual de ${req.user.username} (${branch.name})`, () => {
+      console.log(`Sync de sucursal ${branch.name} iniciado por: ${req.user.username}`);
+      return syncBranch(branch);
+    });
+    if (run.busy) return respondBusy(res, run.status, "[sync]");
 
     res.json({
       status: "success",
       branch: branch.name,
-      ...stats,
+      ...run.result,
     });
   } catch (error) {
     handleControllerError(res, error, "Error sincronizando sucursal:");

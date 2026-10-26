@@ -1,64 +1,71 @@
+const VALID_ROLES = ["admin", "manager", "employee"];
+const USERNAME_PATTERN = /^[a-zA-Z0-9._-]+$/;
+
+/**
+ * Reglas de usuario/contraseña compartidas por login, registro y el ABM de
+ * usuarios. Devuelve el mensaje de error, o null si es válido. `username` ya
+ * debe venir recortado (trim).
+ */
+function getUsernameLengthError(username) {
+  return username.length < 2 || username.length > 50
+    ? "El usuario debe tener entre 2 y 50 caracteres"
+    : null;
+}
+
+function getUsernameFormatError(username) {
+  return USERNAME_PATTERN.test(username)
+    ? null
+    : "El usuario solo puede contener letras, números, puntos, guiones y guiones bajos";
+}
+
+function getUsernameError(username) {
+  return getUsernameLengthError(username) || getUsernameFormatError(username);
+}
+
+function getPasswordError(password) {
+  if (password.length < 4 || password.length > 100) {
+    return "La contraseña debe tener entre 4 y 100 caracteres";
+  }
+  return null;
+}
+
+const isValidRole = (role) => VALID_ROLES.includes(role);
+
+const badRequest = (res, message) => res.status(400).json({ status: "error", message });
+
 // Validación de input para login
 function validateLoginInput(req, res, next) {
   const { username, password } = req.body;
 
   if (!username || !password) {
-    return res.status(400).json({
-      status: "error",
-      message: "Usuario y contraseña son requeridos",
-    });
+    return badRequest(res, "Usuario y contraseña son requeridos");
   }
 
   if (typeof username !== "string" || typeof password !== "string") {
-    return res.status(400).json({
-      status: "error",
-      message: "Usuario y contraseña deben ser texto",
-    });
+    return badRequest(res, "Usuario y contraseña deben ser texto");
   }
 
   req.body.username = username.trim();
-  if (req.body.username.length < 2 || req.body.username.length > 50) {
-    return res.status(400).json({
-      status: "error",
-      message: "El usuario debe tener entre 2 y 50 caracteres",
-    });
-  }
-
-  if (password.length < 4 || password.length > 100) {
-    return res.status(400).json({
-      status: "error",
-      message: "La contraseña debe tener entre 4 y 100 caracteres",
-    });
-  }
-
-  if (!/^[a-zA-Z0-9._-]+$/.test(req.body.username)) {
-    return res.status(400).json({
-      status: "error",
-      message:
-        "El usuario solo puede contener letras, números, puntos, guiones y guiones bajos",
-    });
-  }
+  const error =
+    getUsernameLengthError(req.body.username) ||
+    getPasswordError(password) ||
+    getUsernameFormatError(req.body.username);
+  if (error) return badRequest(res, error);
 
   next();
 }
 
 // Validación de input para registro
 function validateRegisterInput(req, res, next) {
-  const { username, password, role, branch_id } = req.body;
+  const { role, branch_id } = req.body;
 
   validateLoginInput(req, res, () => {
-    if (role && !["admin", "manager", "employee"].includes(role)) {
-      return res.status(400).json({
-        status: "error",
-        message: "Rol inválido. Debe ser: admin, manager o employee",
-      });
+    if (role && !isValidRole(role)) {
+      return badRequest(res, "Rol inválido. Debe ser: admin, manager o employee");
     }
 
     if (branch_id && (typeof branch_id !== "number" || branch_id < 1)) {
-      return res.status(400).json({
-        status: "error",
-        message: "ID de sucursal inválido",
-      });
+      return badRequest(res, "ID de sucursal inválido");
     }
 
     next();
@@ -138,6 +145,9 @@ const validateStockItemUpdate = (req, res, next) => {
 };
 
 module.exports = {
+  getUsernameError,
+  getPasswordError,
+  isValidRole,
   validateLoginInput,
   validateRegisterInput,
   validateStockItemInput,

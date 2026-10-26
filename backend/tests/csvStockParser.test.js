@@ -39,7 +39,8 @@ test("parseStockCsv lee cabecera, filas y avisos", () => {
     "CORTA;1\n\n";
   const r = parseStockCsv(Buffer.from(csv, "latin1"));
   assert.equal(r.branchName, "Nodo-hub");
-  assert.ok(r.exportedAt instanceof Date);
+  // 13:32:36 hora Argentina = 16:32:36 UTC, sin importar la zona del servidor.
+  assert.equal(r.exportedAt.toISOString(), "2026-09-08T16:32:36.000Z");
   assert.deepEqual(r.rows, [
     { productName: "RUSTY BANRAPP C1 02-26 ARMAZON", code: "778029", stock: 1, costWithVat: 56684.87, line: 4 },
     { productName: "SIN COSTO", code: "111", stock: 3, costWithVat: null, line: 5 },

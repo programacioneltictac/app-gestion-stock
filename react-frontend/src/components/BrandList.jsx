@@ -242,6 +242,7 @@ export default function BrandList() {
             isOptionEqualToValue={(o, v) => o.id === v.id}
             value={suppliers.find((s) => s.id === row.supplier_id) || null}
             onChange={(_, val) => handleChangeSupplier(row, val)}
+            disabled={!isAdmin}
             renderInput={(params) => (
               <TextField {...params} variant="standard" placeholder="Sin proveedor" />
             )}
@@ -260,6 +261,7 @@ export default function BrandList() {
               size="small"
               checked={row.is_groupable}
               onChange={() => handleToggleIsGroupable(row)}
+              disabled={!isAdmin}
             />
             <Chip
               label={row.is_groupable ? "Sí" : "No"}
@@ -270,7 +272,7 @@ export default function BrandList() {
         ),
       },
     ],
-    [handleToggleIsGroupable, handleChangeSupplier, suppliers]
+    [handleToggleIsGroupable, handleChangeSupplier, suppliers, isAdmin]
   );
 
   const initialState = React.useMemo(

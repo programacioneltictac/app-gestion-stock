@@ -11,11 +11,10 @@
  *    a UTC ni calcular DST a mano. Render corre en UTC; la timezone resuelve eso.
  *  - Llama a las funciones internas directo (sin pasar por HTTP/JWT): es código
  *    del propio backend, no necesita autenticarse contra sí mismo.
- *  - Lock en memoria (isRunning): evita que dos corridas se solapen — si una
- *    corrida aún no terminó, el siguiente disparo del cron no arranca. El sync
- *    manual (POST /api/sync/all) consulta el lock vía isSyncRunning() y responde
- *    409 con el tiempo restante estimado en vez de correr en paralelo (dos syncs
- *    a la vez harían UPDATE stock=0 + re-acumular pisándose). (1 instancia.)
+ *  - Lock en memoria compartido (utils/syncLock): si una corrida aún no terminó,
+ *    el siguiente disparo del cron no arranca, y los syncs manuales / import CSV
+ *    responden 409 en vez de correr en paralelo (dos corridas a la vez harían
+ *    UPDATE stock=0 + re-acumular pisándose). (1 instancia.)
  *  - Stock está blindado (guard EMPTY_API_RESPONSE): si el token de IDUO está
  *    vencido, las sucursales afectadas se saltan SIN vaciar su stock. Ver
  *    syncService. Compras solo hace upserts no destructivos.
@@ -41,64 +40,26 @@
 const cron = require("node-cron");
 const { syncAllBranches } = require("./syncService");
 const { syncCompras } = require("./comprasService");
+const { runExclusive, isSyncRunning, getSyncRunStatus } = require("./syncLock");
 
 const DEFAULT_CRON = "0 6 * * *"; // 06:00
 const DEFAULT_TZ = "America/Argentina/Buenos_Aires";
-
-// Lock de proceso: una sola corrida a la vez. Lo consulta el sync manual
-// (syncController) para no arrancar en paralelo con la corrida automática.
-let isRunning = false;
-let runStartedAt = null;
-
-// Duración típica medida de un sync completo (9 sucursales × 7 categorías) más
-// el de compras. Sirve SOLO para estimar cuánto falta en el aviso al usuario.
-const TYPICAL_RUN_MS = 13 * 60 * 1000;
-
-function isSyncRunning() {
-  return isRunning;
-}
-
-/**
- * Estado del lock para el aviso del sync manual. `remainingMin` es una
- * estimación optimista (mínimo 1 min mientras siga corriendo); si la corrida ya
- * pasó la duración típica devuelve 1 en vez de 0 o un negativo.
- */
-function getSyncRunStatus() {
-  if (!isRunning) return { running: false };
-  const elapsedMs = runStartedAt ? Date.now() - runStartedAt.getTime() : 0;
-  const remainingMin = Math.max(1, Math.ceil((TYPICAL_RUN_MS - elapsedMs) / 60000));
-  const elapsedMin = Math.floor(elapsedMs / 60000);
-  return {
-    running: true,
-    startedAt: runStartedAt ? runStartedAt.toISOString() : null,
-    elapsedMin,
-    // Texto listo para el aviso: "hace 0 min" se lee mal en el primer minuto.
-    elapsedText: elapsedMin < 1 ? "recién arrancó" : `hace ${elapsedMin} min`,
-    remainingMin,
-  };
-}
 
 /**
  * Corre stock y luego compras en secuencia. Captura todo: el scheduler NUNCA
  * debe tumbar el proceso por un error de sync. Devuelve un resumen.
  */
 async function runDailySync(trigger = "cron") {
-  if (isRunning) {
+  const run = await runExclusive(`automático (${trigger})`, (startedAt) =>
+    executeSync(trigger, startedAt),
+  );
+  if (run.busy) {
     console.warn(
-      `[scheduler] Sync ya en curso; se omite el disparo (${trigger}).`,
+      `[scheduler] Sync ya en curso (${run.status.label}); se omite el disparo (${trigger}).`,
     );
-    return { skipped: true, ...getSyncRunStatus() };
+    return { skipped: true, ...run.status };
   }
-  isRunning = true;
-  runStartedAt = new Date();
-  try {
-    return await executeSync(trigger, runStartedAt);
-  } finally {
-    // Pase lo que pase, el lock se libera: si quedara trabado, ni el cron ni el
-    // sync manual volverían a correr hasta reiniciar el proceso.
-    isRunning = false;
-    runStartedAt = null;
-  }
+  return run.result;
 }
 
 async function executeSync(trigger, startedAt) {
@@ -184,7 +145,7 @@ function startScheduler() {
       expression,
       () => {
         runDailySync(`cron:${label}`).catch((err) =>
-          console.error("[scheduler] Error no capturado en runDailySync:", err),
+          console.error("[scheduler] Error no capturado en runDailySync:", err?.message || err),
         );
       },
       { timezone },

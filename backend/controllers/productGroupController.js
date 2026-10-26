@@ -1,10 +1,16 @@
 const ProductGroup = require("../models/ProductGroup");
 const { handleControllerError } = require("../utils/errorHelper");
+const { canAccessBranch } = require("../middlewares/auth");
 
 // GET /api/product-groups  — listar todos los grupos con stock de la sucursal del usuario
 const getAll = async (req, res) => {
   try {
     const { branch_id } = req.query;
+
+    // Un employee solo puede ver el stock de su propia sucursal.
+    if (branch_id && !canAccessBranch(req.user, branch_id)) {
+      return res.status(403).json({ status: "error", message: "No tienes acceso a esta sucursal" });
+    }
 
     // Si no se pasa branch_id, listar sin stock
     const groups = branch_id

@@ -18,7 +18,9 @@ const authenticateToken = (req, res, next) => {
       .json({ status: "error", message: "Token de acceso requerido" });
   }
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
+  // Algoritmo fijo: evita aceptar tokens firmados con un algoritmo distinto al
+  // que usa authController al emitirlos (jwt.sign por defecto = HS256).
+  jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] }, (err, user) => {
     if (err) {
       return res
         .status(403)

@@ -20,8 +20,18 @@ const StockControl = require("../models/StockControl");
 
 const API_URL = "http://igd.iduo.com.ar/indexinterno.php";
 const API_TOKEN = process.env.EXTERNAL_API_KEY;
-const API_TIMEOUT_MS = Number(process.env.EXTERNAL_API_TIMEOUT_MS);
-const API_RETRY_ATTEMPTS = Number(process.env.EXTERNAL_API_RETRIES);
+// Valor numérico de una env var, o `fallback` si falta o no es un número.
+// Sin esto una env var ausente daba NaN: sin timeout, ningún intento de fetch,
+// o 0 sucursales sincronizadas reportadas como éxito. (Respeta un "0" explícito.)
+const envNumber = (name, fallback) => {
+  const raw = process.env[name];
+  const n = Number(raw);
+  return raw !== undefined && raw.trim() !== "" && Number.isFinite(n) ? n : fallback;
+};
+
+// Defaults iguales a los de comprasService.
+const API_TIMEOUT_MS = envNumber("EXTERNAL_API_TIMEOUT_MS", 480000);
+const API_RETRY_ATTEMPTS = envNumber("EXTERNAL_API_RETRIES", 2);
 const API_RETRY_DELAY_MS = 2000;
 // Filtro de stock para la API: 'todos' trae catálogo completo;
 // 'stockmayoracero' trae solo productos con stock > 0 (más rápido).
@@ -29,7 +39,7 @@ const STOCK_FILTER = process.env.SYNC_STOCK_FILTER || "stockmayoracero";
 // Cantidad de sucursales a sincronizar en paralelo.
 // Cada sucursal toma 1 conexión del pool y hace requests independientes a la API.
 // Subir con cuidado: la API externa puede tener límites de concurrencia.
-const SYNC_CONCURRENCY = Math.max(1, Number(process.env.SYNC_CONCURRENCY));
+const SYNC_CONCURRENCY = Math.max(1, envNumber("SYNC_CONCURRENCY", 1));
 // Pausa entre requests consecutivos a la API dentro de una misma sucursal.
 // Evita ráfagas que saturen al proveedor externo.
 const REQUEST_DELAY_MS = Math.max(
@@ -151,7 +161,8 @@ function extractApiFields(apiProduct) {
     externalId: String(apiProduct.idproducto || ""),
     productName: String(apiProduct.nombreproducto || "").trim(),
     codigos: String(apiProduct.codigos || "").trim(),
-    stock: Math.max(0, parseInt(unit.stock ?? 0, 10)),
+    // Un stock no numérico daba NaN y la fila se descartaba en silencio.
+    stock: Math.max(0, parseInt(unit.stock ?? 0, 10) || 0),
     costPrice: parseFloat(
       (parseFloat(unit.preciocosto ?? 0) / 1.21).toFixed(2),
     ),
@@ -931,8 +942,8 @@ async function syncAllBranches() {
        SELECT id FROM product_groups
        WHERE id NOT IN (SELECT DISTINCT group_id FROM products WHERE group_id IS NOT NULL)
      )
-     AND id NOT IN (
-       SELECT DISTINCT product_stock_id FROM stock_controls
+     AND NOT EXISTS (
+       SELECT 1 FROM stock_controls sc WHERE sc.product_stock_id = product_stock_by_branch.id
      )`,
   );
 
