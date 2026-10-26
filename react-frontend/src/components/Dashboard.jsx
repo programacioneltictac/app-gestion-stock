@@ -31,7 +31,6 @@ import { useAuth } from '../context/AuthContext';
 import { getAlerts } from '../data/alerts';
 import { getBranchesList } from '../data/branches';
 import { getSituation } from '../data/reports';
-import { generateSituationPdf } from '../utils/situationPdf';
 import PageContainer from './PageContainer';
 import { dashboardListScrollSx } from '../utils/scrollStyles';
 
@@ -167,7 +166,12 @@ export default function Dashboard() {
     setIsDownloading(true);
     setReportError(null);
     try {
-      generateSituationPdf(await getSituation());
+      // jspdf se descarga recién al pedir el PDF: no pesa en la carga inicial.
+      const [{ generateSituationPdf }, situation] = await Promise.all([
+        import('../utils/situationPdf'),
+        getSituation(),
+      ]);
+      generateSituationPdf(situation);
     } catch (err) {
       setReportError(err);
     }

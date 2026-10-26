@@ -30,19 +30,21 @@ class Brand {
     const whereB = where.replace(/\bis_active\b/g, "b.is_active").replace(/\bbrand_name\b/g, "b.brand_name");
 
     params.push(pageSize, offset);
-    const data = await pool.query(
-      `SELECT b.id, b.brand_name, b.is_groupable, b.supplier_id, s.supplier_name
-       FROM brands b
-       LEFT JOIN suppliers s ON b.supplier_id = s.id
-       WHERE ${whereB}
-       ORDER BY b.brand_name
-       LIMIT $${params.length - 1} OFFSET $${params.length}`,
-      params
-    );
-    const count = await pool.query(
-      `SELECT COUNT(*) as total FROM brands b WHERE ${whereB}`,
-      params.slice(0, -2)
-    );
+    const [data, count] = await Promise.all([
+      pool.query(
+        `SELECT b.id, b.brand_name, b.is_groupable, b.supplier_id, s.supplier_name
+         FROM brands b
+         LEFT JOIN suppliers s ON b.supplier_id = s.id
+         WHERE ${whereB}
+         ORDER BY b.brand_name
+         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params
+      ),
+      pool.query(
+        `SELECT COUNT(*) as total FROM brands b WHERE ${whereB}`,
+        params.slice(0, -2)
+      ),
+    ]);
 
     return {
       brands: data.rows,

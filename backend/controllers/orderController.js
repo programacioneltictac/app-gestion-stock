@@ -2,6 +2,7 @@ const Order = require("../models/Order");
 const MonthlyControl = require("../models/MonthlyControl");
 const { canAccessBranch } = require("../middlewares/auth");
 const { handleControllerError } = require("../utils/errorHelper");
+const { parsePositiveInt } = require("../utils/pagination");
 const {
   ORDER_STATUSES,
   ORDER_STATUSES_TERMINAL,
@@ -73,7 +74,7 @@ const createFromControl = async (req, res) => {
 // Lista ordenes (admin/manager: todas; employee: solo su sucursal)
 const getOrders = async (req, res) => {
   try {
-    const { limit = 50 } = req.query;
+    const limit = parsePositiveInt(req.query.limit, 50);
     // view separa el listado en activas (en gestión) vs archivadas
     // (finalizadas/canceladas). Default 'active'. Cualquier valor no reconocido
     // cae a 'active' para no exponer todo por error.

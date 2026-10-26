@@ -183,37 +183,50 @@ class Order {
       const internalLines = []; // { stock_control_id, product_stock_id, display_name, qty, unit_cost }
       const externalLines = [];
 
+      // disponible_hub = stock del Hub del mismo producto/grupo MENOS lo ya
+      // comprometido en ordenes internas abiertas (todas salvo 'cancelado').
+      // La reserva cruza por el psb del HUB (hub_psb.id): la linea interna se
+      // guarda con product_stock_id = psb del Hub (de donde sale el stock).
+      // Una sola consulta para todos los items (antes era una por item): las
+      // lineas se insertan despues, asi que cada item ve la misma reserva que
+      // veia antes. (branch_id, product_id) y (branch_id, group_id) son unicos.
+      const hubByProduct = new Map();
+      const hubByGroup = new Map();
+      if (useHub) {
+        const productIds = items.filter((it) => it.product_id).map((it) => it.product_id);
+        const groupIds = items.filter((it) => !it.product_id && it.group_id).map((it) => it.group_id);
+        const availResult = await client.query(
+          `SELECT
+             hub_psb.id                 AS hub_psb_id,
+             hub_psb.product_id,
+             hub_psb.group_id,
+             COALESCE(hub_psb.stock, 0) AS hub_stock,
+             COALESCE((
+               SELECT SUM(od.quantity_ordered)
+               FROM order_details od
+               JOIN orders_controls oc ON od.order_control_id = oc.id
+               WHERE oc.order_type = 'internal'
+                 AND oc.source_branch_id = $1
+                 AND ${LIVE_RESERVATION_SQL}
+                 AND od.product_stock_id = hub_psb.id
+             ), 0) AS reservado
+           FROM product_stock_by_branch hub_psb
+           WHERE hub_psb.branch_id = $1
+             AND (hub_psb.product_id = ANY($2::int[]) OR hub_psb.group_id = ANY($3::int[]))`,
+          [hubBranchId, productIds, groupIds]
+        );
+        for (const row of availResult.rows) {
+          if (row.product_id) hubByProduct.set(row.product_id, row);
+          else hubByGroup.set(row.group_id, row);
+        }
+      }
+
       for (const it of items) {
         let cubribleHub = 0;
         let hubPsbId = null; // psb del Hub de este producto (origen de la interna)
 
         if (useHub && (it.product_id || it.group_id)) {
-          const column = it.product_id ? "product_id" : "group_id";
-          const refId = it.product_id || it.group_id;
-
-          // disponible_hub = stock del Hub del mismo producto/grupo MENOS lo ya
-          // comprometido en ordenes internas abiertas (todas salvo 'cancelado').
-          // La reserva cruza por el psb del HUB (hub_psb.id): la linea interna se
-          // guarda con product_stock_id = psb del Hub (de donde sale el stock).
-          const availResult = await client.query(
-            `SELECT
-               hub_psb.id                 AS hub_psb_id,
-               COALESCE(hub_psb.stock, 0) AS hub_stock,
-               COALESCE((
-                 SELECT SUM(od.quantity_ordered)
-                 FROM order_details od
-                 JOIN orders_controls oc ON od.order_control_id = oc.id
-                 WHERE oc.order_type = 'internal'
-                   AND oc.source_branch_id = $1
-                   AND ${LIVE_RESERVATION_SQL}
-                   AND od.product_stock_id = hub_psb.id
-               ), 0) AS reservado
-             FROM product_stock_by_branch hub_psb
-             WHERE hub_psb.branch_id = $1 AND hub_psb.${column} = $2`,
-            [hubBranchId, refId]
-          );
-
-          const row = availResult.rows[0];
+          const row = it.product_id ? hubByProduct.get(it.product_id) : hubByGroup.get(it.group_id);
           if (row) {
             hubPsbId = row.hub_psb_id;
             const disponible = Math.max(0, Number(row.hub_stock) - Number(row.reservado));
@@ -248,20 +261,30 @@ class Order {
 
       // Helper: inserta lineas en una orden ya existente. La interna no lleva
       // proveedor; la externa lo guarda en cada detalle (ya derivado en ln.supplier_id).
+      // Un solo INSERT por orden (antes uno por linea), con los mismos valores.
       const appendLinesToOrder = async (orderId, lines, isExternal) => {
-        for (const ln of lines) {
-          await client.query(
-            `INSERT INTO order_details
-               (order_control_id, stock_control_id, product_stock_id, display_name,
-                quantity_ordered, quantity_received, unit_cost, cost_estimate, supplier_id)
-             VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8)`,
-            [
-              orderId, ln.stock_control_id, ln.product_stock_id, ln.display_name,
-              ln.qty, ln.unit_cost, ln.unit_cost * ln.qty,
-              isExternal ? ln.supplier_id || null : null,
-            ]
-          );
-        }
+        await client.query(
+          `INSERT INTO order_details
+             (order_control_id, stock_control_id, product_stock_id, display_name,
+              quantity_ordered, quantity_received, unit_cost, cost_estimate, supplier_id)
+           SELECT $1, ln.stock_control_id, ln.product_stock_id, ln.display_name,
+                  ln.qty, 0, ln.unit_cost, ln.cost_estimate, ln.supplier_id
+           FROM unnest($2::int[], $3::int[], $4::varchar[], $5::int[],
+                       $6::numeric[], $7::numeric[], $8::int[])
+             WITH ORDINALITY AS ln(stock_control_id, product_stock_id, display_name, qty,
+                                   unit_cost, cost_estimate, supplier_id, ord)
+           ORDER BY ln.ord`,
+          [
+            orderId,
+            lines.map((ln) => ln.stock_control_id),
+            lines.map((ln) => ln.product_stock_id),
+            lines.map((ln) => ln.display_name),
+            lines.map((ln) => ln.qty),
+            lines.map((ln) => ln.unit_cost),
+            lines.map((ln) => ln.unit_cost * ln.qty),
+            lines.map((ln) => (isExternal ? ln.supplier_id || null : null)),
+          ]
+        );
       };
 
       // Helper: recalcula el total de la orden y devuelve el objeto fresco.

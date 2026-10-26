@@ -30,17 +30,80 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Las regex se compilan UNA vez y no por producto: el sync procesa miles de
+// nombres contra las mismas marcas/keywords. Las listas (marcas, keywords) se
+// cachean por identidad del array, asi que quien las pasa NO debe mutarlas
+// despues de usarlas (el sync y el import las arman una vez por corrida).
+const memoByArray = (build) => {
+  const cache = new WeakMap();
+  return (list) => {
+    let compiled = cache.get(list);
+    if (!compiled) {
+      compiled = build(list);
+      cache.set(list, compiled);
+    }
+    return compiled;
+  };
+};
+
+// Palabra completa, sin importar mayusculas (ej: "RAY" no matchea "SPRAY").
+const wordRegex = (word) => new RegExp(`\\b${escapeRegex(word)}\\b`, "i");
+
+// Keyword de rubro con sus espacios flexibles (tolera doble espacio en la carga de IDUO).
+const flexibleKeyword = (kw) => escapeRegex(kw).replace(/ +/g, "\\s+");
+
+const byLengthDesc = (getText) => (a, b) => getText(b).length - getText(a).length;
+
+const QUALIFIER_MATCHERS = GROUP_QUALIFIERS.map((q) => ({
+  label: q.label,
+  regexes: q.synonyms.map(wordRegex),
+}));
+
 // Devuelve la etiqueta del primer calificador presente en el nombre (o null).
 // Match por límite de palabra para no agrupar substrings accidentales.
 function detectQualifier(upperName) {
-  for (const q of GROUP_QUALIFIERS) {
-    for (const syn of q.synonyms) {
-      const re = new RegExp(`\\b${escapeRegex(syn)}\\b`, "i");
-      if (re.test(upperName)) return q.label;
-    }
+  for (const q of QUALIFIER_MATCHERS) {
+    if (q.regexes.some((re) => re.test(upperName))) return q.label;
   }
   return null;
 }
+
+// "MM-AA RUBRO" al final del nombre, una regex por keyword. Ordenadas por
+// longitud descendente: "LENTES DE SOL" antes que "LENTE DE SOL" para que no
+// matchee la variante corta dentro de la larga.
+const getSuffixMatchers = memoByArray((keywords) =>
+  [...keywords]
+    .filter(Boolean)
+    .sort(byLengthDesc((kw) => kw))
+    .map((kw) => new RegExp(`\\s+\\d{2}-\\d{2}\\s+${flexibleKeyword(kw)}\\s*$`, "i")),
+);
+
+// (^|\s)KEYWORD$ -> el rubro va al final, con o sin fecha delante.
+// Respeta el orden recibido (el llamador ya las ordena por longitud).
+const getCategoryMatchers = memoByArray((keywordToCat) =>
+  keywordToCat
+    .filter((entry) => entry && entry.keyword)
+    .map((entry) => ({
+      entry,
+      re: new RegExp(`(?:^|\\s)${flexibleKeyword(entry.keyword.toUpperCase())}\\s*$`),
+    })),
+);
+
+// Marcas ordenadas por longitud descendente para que "CELINE KHAN" gane a "KHAN".
+const getGroupMatchers = memoByArray((brands) =>
+  [...brands]
+    .sort(byLengthDesc((b) => b.brand_name))
+    .map((brand) => {
+      const keyword = brand.brand_name.toUpperCase();
+      return { brand, keyword, qualifier: detectQualifier(keyword) };
+    }),
+);
+
+const getBrandMatchers = memoByArray((brands) =>
+  [...brands]
+    .sort(byLengthDesc((b) => b.brand_name))
+    .map((brand) => ({ brand, re: wordRegex(brand.brand_name.toUpperCase()) })),
+);
 
 /**
  * Limpia el nombre de un producto eliminando el sufijo "MM-AA RUBRO" del final.
@@ -61,18 +124,7 @@ function parseProductName(name, keywords = []) {
 
   let cleanName = name.trim();
 
-  // Ordenar keywords por longitud descendente: "LENTES DE SOL" antes que
-  // "LENTE DE SOL" para que no matchee la variante corta dentro de la larga.
-  const sorted = [...(keywords || [])]
-    .filter(Boolean)
-    .sort((a, b) => b.length - a.length);
-
-  for (const kw of sorted) {
-    // Patrón: \d{2}-\d{2} + espacio(s) + keyword al final del string.
-    // Se escapan los metacaracteres del keyword y sus espacios se vuelven \s+ flexibles.
-    const kwPattern = escapeRegex(kw).replace(/ +/g, "\\s+");
-    const pattern = `\\s+\\d{2}-\\d{2}\\s+${kwPattern}\\s*$`;
-    const regex = new RegExp(pattern, "i");
+  for (const regex of getSuffixMatchers(keywords || [])) {
     if (regex.test(cleanName)) {
       cleanName = cleanName.replace(regex, "").trim();
       return { cleanName };
@@ -115,13 +167,7 @@ function detectCategoryFromName(productName, keywordToCat) {
     return null;
   }
 
-  for (const entry of keywordToCat) {
-    if (!entry || !entry.keyword) continue;
-    // (^|\s)KEYWORD$  -> el rubro va al final, con o sin fecha delante.
-    // Los espacios del keyword se vuelven \s+ flexibles (mismo criterio que
-    // parseProductName) para tolerar doble espacio en la carga de IDUO.
-    const kwPattern = escapeRegex(entry.keyword.toUpperCase()).replace(/ +/g, "\\s+");
-    const re = new RegExp(`(?:^|\\s)${kwPattern}\\s*$`);
+  for (const { entry, re } of getCategoryMatchers(keywordToCat)) {
     if (re.test(upper)) {
       return { categoryId: entry.categoryId, keyword: entry.keyword };
     }
@@ -146,16 +192,11 @@ function detectGroup(cleanName, categoryName, groupableBrands) {
   const categoryLabel = categoryName.toUpperCase();
 
   // Buscar si alguna marca agrupable está contenida en el nombre del producto
-  // Ordenar por longitud descendente para que "CELINE KHAN" matchee antes que "KHAN"
-  const sorted = [...groupableBrands].sort((a, b) => b.brand_name.length - a.brand_name.length);
-
-  for (const brand of sorted) {
-    const keyword = brand.brand_name.toUpperCase();
+  for (const { brand, keyword, qualifier: brandQualifier } of getGroupMatchers(groupableBrands)) {
     if (upperName.includes(keyword)) {
       // Si la marca ya implica un calificador (ej: "GOD KIDS" ya es KIDS), no se
       // vuelve a agregar aunque el nombre traiga ese calificador o un sinónimo
       // (evita "GOD KIDS KIDS ..." con "GOD KIDS NIÑO ...").
-      const brandQualifier = detectQualifier(keyword);
       const nameQualifier = detectQualifier(upperName);
       const qualifier = nameQualifier === brandQualifier ? null : nameQualifier;
 
@@ -196,12 +237,9 @@ function detectBrandInName(productName, brands) {
   if (!productName || !Array.isArray(brands) || brands.length === 0) return null;
 
   const upperName = productName.toUpperCase();
-  const sorted = [...brands].sort((a, b) => b.brand_name.length - a.brand_name.length);
 
-  for (const brand of sorted) {
-    const keyword = brand.brand_name.toUpperCase();
-    // Límite de palabra para no matchear substrings accidentales (ej: "RAY" en "SPRAY").
-    const re = new RegExp(`\\b${escapeRegex(keyword)}\\b`, "i");
+  // Límite de palabra para no matchear substrings accidentales (ej: "RAY" en "SPRAY").
+  for (const { brand, re } of getBrandMatchers(brands)) {
     if (re.test(upperName)) {
       return { brandId: brand.id, brandName: brand.brand_name };
     }

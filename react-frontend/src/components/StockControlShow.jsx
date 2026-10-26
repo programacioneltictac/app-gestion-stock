@@ -41,7 +41,6 @@ import {
   getPromoProducts,
 } from "../data/stock";
 import { createOrderFromControl } from "../data/orders";
-import { exportStockControlToExcel } from "../utils/stockControlExcel";
 import PageContainer from "./PageContainer";
 import ActionButton from "./ActionButton";
 
@@ -341,6 +340,8 @@ export default function StockControlShow() {
     setIsExporting(true);
     try {
       const discData = discLoaded ? discontinued : await loadDiscontinued();
+      // exceljs se descarga recién al exportar: no pesa en la carga inicial.
+      const { exportStockControlToExcel } = await import("../utils/stockControlExcel");
       await exportStockControlToExcel(control, items, discData);
     } catch (err) {
       notifications.show(`Error al exportar: ${err.message}`, {

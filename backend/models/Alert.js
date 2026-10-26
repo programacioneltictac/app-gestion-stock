@@ -28,7 +28,7 @@ class Alert {
 
     // 1) Faltantes MUY PRIORITARIOS por sucursal+rubro (estado generar_pedido,
     //    no pedidos, en controles activos draft+completed). Navega al control puntual.
-    const muyPrioritarios = await pool.query(
+    const muyPrioritariosQuery = pool.query(
       `SELECT mc.id          AS control_id,
               mc.branch_id,
               b.name          AS branch_name,
@@ -56,7 +56,7 @@ class Alert {
 
     // 2) Sucursales críticas: ranking por ítems en generar_pedido (no pedidos,
     //    reponibles) en controles activos draft+completed. Navega a los controles de la sucursal.
-    const criticalBranches = await pool.query(
+    const criticalBranchesQuery = pool.query(
       `SELECT mc.branch_id,
               b.name      AS branch_name,
               b.is_hub,
@@ -79,7 +79,7 @@ class Alert {
     //    fuente única StockControl.determineStockStatus). Es el extremo opuesto
     //    de (1): producto GESTIONADO que sobra, distinto del discontinuo (4),
     //    que es producto fuera del control. Navega al control puntual.
-    const overstockBranches = await pool.query(
+    const overstockBranchesQuery = pool.query(
       `SELECT mc.id          AS control_id,
               mc.branch_id,
               b.name          AS branch_name,
@@ -107,7 +107,7 @@ class Alert {
     // 3) Órdenes pendientes (status = 'pending'), separadas por tipo:
     //    external = a proveedor, internal = a Nodo Hub. Para employee, de su sucursal.
     const ordersBranchClause = branchIds ? "AND oc.branch_id = ANY($1::int[])" : "";
-    const pendingOrders = await pool.query(
+    const pendingOrdersQuery = pool.query(
       `SELECT
          COUNT(*)                                              AS total,
          COUNT(*) FILTER (WHERE oc.order_type = 'external')    AS supplier,
@@ -119,7 +119,7 @@ class Alert {
 
     // 3b) Órdenes autorizadas (status = 'autorizado'): listas para enviar al
     //     proveedor. Mismo criterio de sucursal que las pendientes.
-    const authorizedOrders = await pool.query(
+    const authorizedOrdersQuery = pool.query(
       `SELECT COUNT(*) AS total
        FROM orders_controls oc
        WHERE oc.status = 'autorizado' ${ordersBranchClause}`,
@@ -141,7 +141,7 @@ class Alert {
     //     Solo 'finalizado': una orden 'cancelado' no completó el ciclo y su
     //     demora no dice nada sobre la operatividad.
     const cycleExpr = "EXTRACT(EPOCH FROM (oc.finalized_at - oc.created_at)) / 86400";
-    const cycleTime = await pool.query(
+    const cycleTimeQuery = pool.query(
       `SELECT
          ROUND(AVG(${cycleExpr}) FILTER (WHERE oc.order_type = 'external'))::int AS cycle_days_supplier,
          ROUND(AVG(${cycleExpr}) FILTER (WHERE oc.order_type = 'internal'))::int AS cycle_days_hub,
@@ -156,7 +156,7 @@ class Alert {
     // 4) Discontinuos valorizados por sucursal+rubro: stock*costo de productos
     //    del rubro CON stock que NO están en el control activo (draft+completed,
     //    sobrante a liquidar). Navega al control (tab Discontinuos).
-    const discontinuedValue = await pool.query(
+    const discontinuedValueQuery = pool.query(
       `SELECT mc.id        AS control_id,
               mc.branch_id,
               b.name        AS branch_name,
@@ -200,7 +200,7 @@ class Alert {
     // 5) Compliance promedio general: AVG del compliance de TODOS los items de
     //    controles activos draft+completed (todas las sucursales y rubros). Misma
     //    fórmula que MonthlyControl.avg_compliance (require=0 => 100). Foto del estado actual.
-    const avgCompliance = await pool.query(
+    const avgComplianceQuery = pool.query(
       `SELECT ROUND(AVG(
                 CASE
                   WHEN sc.stock_require = 0 THEN 100
@@ -214,7 +214,31 @@ class Alert {
     );
 
     // 6) Marcas a prueba vencidas sin decidir (pendientes de evaluación).
-    const brandTrialsDue = await BrandTrial.countDue(branchIds);
+    const brandTrialsDueQuery = BrandTrial.countDue(branchIds);
+
+    // Las consultas son independientes: corren en paralelo y la latencia total
+    // es la de la más lenta, no la suma (mismo patrón que Report.getSituation).
+    const [
+      muyPrioritarios,
+      criticalBranches,
+      overstockBranches,
+      pendingOrders,
+      authorizedOrders,
+      cycleTime,
+      discontinuedValue,
+      avgCompliance,
+      brandTrialsDue,
+    ] = await Promise.all([
+      muyPrioritariosQuery,
+      criticalBranchesQuery,
+      overstockBranchesQuery,
+      pendingOrdersQuery,
+      authorizedOrdersQuery,
+      cycleTimeQuery,
+      discontinuedValueQuery,
+      avgComplianceQuery,
+      brandTrialsDueQuery,
+    ]);
 
     const cycle = cycleTime.rows[0] || {};
     return {

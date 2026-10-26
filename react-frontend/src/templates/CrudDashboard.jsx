@@ -1,23 +1,10 @@
 import * as React from "react";
 import CssBaseline from "@mui/material/CssBaseline";
+import Box from "@mui/material/Box";
+import CircularProgress from "@mui/material/CircularProgress";
 import { createHashRouter, RouterProvider } from "react-router";
 import DashboardLayout from "../components/DashboardLayout";
 import Dashboard from "../components/Dashboard";
-import ProductList from "../components/ProductList";
-import BrandList from "../components/BrandList";
-import SupplierList from "../components/SupplierList";
-import BranchList from "../components/BranchList";
-import BrandTrialList from "../components/BrandTrialList";
-import SettingsPage from "../components/SettingsPage";
-import StockImportPage from "../components/StockImportPage";
-import StockControlList from "../components/StockControlList";
-import StockControlShow from "../components/StockControlShow";
-import QuickSearch from "../components/QuickSearch";
-import OrderList from "../components/OrderList";
-import OrderShow from "../components/OrderShow";
-import UsersList from "../components/UsersList";
-import UserCreate from "../components/UserCreate";
-import UserEdit from "../components/UserEdit";
 import Login from "./Login";
 import Unauthorized from "./Unauthorized";
 import ProtectedRoute from "../components/ProtectedRoute";
@@ -31,6 +18,34 @@ import {
   sidebarCustomizations,
   formInputCustomizations,
 } from "../theme/customizations";
+
+// Code splitting por ruta: cada pantalla se descarga recién al navegar a ella,
+// así la carga inicial no trae el código de todas. Login, layout y Dashboard
+// quedan en el bundle principal porque son la entrada de la app.
+// `requiredRoles` envuelve la pantalla en ProtectedRoute (el control real de
+// permisos está en el backend; esto solo evita mostrarla a quien no corresponde).
+const lazyPage = (load, requiredRoles) => async () => {
+  const { default: Page } = await load();
+  if (!requiredRoles) return { Component: Page };
+  return {
+    Component: function RoleProtectedPage() {
+      return (
+        <ProtectedRoute requiredRoles={requiredRoles}>
+          <Page />
+        </ProtectedRoute>
+      );
+    },
+  };
+};
+
+// Mientras se descarga la pantalla de la primera carga (entrar directo a una URL).
+function PageLoader() {
+  return (
+    <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
+      <CircularProgress />
+    </Box>
+  );
+}
 
 const router = createHashRouter([
   {
@@ -47,6 +62,7 @@ const router = createHashRouter([
         <DashboardLayout />
       </ProtectedRoute>
     ),
+    HydrateFallback: PageLoader,
     children: [
       {
         path: "/",
@@ -55,89 +71,73 @@ const router = createHashRouter([
       // Buscador rapido: productos por proveedor/nombre agrupados por sucursal
       {
         path: "/search",
-        Component: QuickSearch,
+        lazy: lazyPage(() => import("../components/QuickSearch")),
       },
       // Stock Control routes
       {
         path: "/stock-control/:branchId",
-        Component: StockControlList,
+        lazy: lazyPage(() => import("../components/StockControlList")),
       },
       {
         path: "/stock-control/:branchId/control/:controlId",
-        Component: StockControlShow,
+        lazy: lazyPage(() => import("../components/StockControlShow")),
       },
       // Products routes
       {
         path: "/products",
-        Component: ProductList,
+        lazy: lazyPage(() => import("../components/ProductList")),
       },
       // Brands routes
       {
         path: "/brands",
-        Component: BrandList,
+        lazy: lazyPage(() => import("../components/BrandList")),
       },
       // Suppliers routes
       {
         path: "/suppliers",
-        Component: SupplierList,
+        lazy: lazyPage(() => import("../components/SupplierList")),
       },
       // Sucursales: desactivar/reactivar — solo admin
       {
         path: "/branches",
-        element: (
-          <ProtectedRoute requiredRoles={["admin"]}>
-            <BranchList />
-          </ProtectedRoute>
-        ),
+        lazy: lazyPage(() => import("../components/BranchList"), ["admin"]),
       },
       // Settings (configuración global) — solo admin
       {
         path: "/settings",
-        element: (
-          <ProtectedRoute requiredRoles={["admin"]}>
-            <SettingsPage />
-          </ProtectedRoute>
-        ),
+        lazy: lazyPage(() => import("../components/SettingsPage"), ["admin"]),
       },
       // Importacion manual de stock por CSV (contingencia) — solo admin
       {
         path: "/import-stock",
-        element: (
-          <ProtectedRoute requiredRoles={["admin"]}>
-            <StockImportPage />
-          </ProtectedRoute>
-        ),
+        lazy: lazyPage(() => import("../components/StockImportPage"), ["admin"]),
       },
       // Users routes
       {
         path: "/users",
-        Component: UsersList,
+        lazy: lazyPage(() => import("../components/UsersList")),
       },
       {
         path: "/users/new",
-        Component: UserCreate,
+        lazy: lazyPage(() => import("../components/UserCreate")),
       },
       {
         path: "/users/:userId/edit",
-        Component: UserEdit,
+        lazy: lazyPage(() => import("../components/UserEdit")),
       },
       // Marcas a prueba (admin/manager)
       {
         path: "/brand-trials",
-        element: (
-          <ProtectedRoute requiredRoles={["admin", "manager"]}>
-            <BrandTrialList />
-          </ProtectedRoute>
-        ),
+        lazy: lazyPage(() => import("../components/BrandTrialList"), ["admin", "manager"]),
       },
       // Orders routes
       {
         path: "/orders",
-        Component: OrderList,
+        lazy: lazyPage(() => import("../components/OrderList")),
       },
       {
         path: "/orders/:orderId",
-        Component: OrderShow,
+        lazy: lazyPage(() => import("../components/OrderShow")),
       },
       // Fallback route - redirect to dashboard
       {

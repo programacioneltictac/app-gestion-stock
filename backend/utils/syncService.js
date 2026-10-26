@@ -193,13 +193,25 @@ async function getAllBrands() {
 }
 
 /**
+ * Categorías con api_product_id configurado (las que se piden a la API).
+ * name_keywords: variantes del rubro al final del nombre, para limpiar el sufijo.
+ */
+async function getSyncCategories() {
+  const result = await pool.query(
+    "SELECT id, category_name, api_product_id, name_keywords FROM categories WHERE api_product_id IS NOT NULL AND is_active = true",
+  );
+  return result.rows;
+}
+
+/**
  * Sincroniza los productos de UNA sucursal iterando todas las categorías con api_product_id.
  * @param {Object} branch - Objeto branch con id, api_branch_code, api_deposit_code
  * @param {Array|null} groupableBrands - Marcas agrupables [{id, brand_name}]; si null se consultan
  * @param {Array|null} allBrands - Todas las marcas activas [{id, brand_name}]; si null se consultan
+ * @param {Array|null} categories - Categorías a sincronizar (getSyncCategories); si null se consultan
  * @returns {{ synced: number, grouped: number, errors: number }}
  */
-async function syncBranch(branch, groupableBrands = null, allBrands = null) {
+async function syncBranch(branch, groupableBrands = null, allBrands = null, categories = null) {
   const stats = { synced: 0, grouped: 0, errors: 0 };
 
   if (!groupableBrands) {
@@ -208,13 +220,9 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
   if (!allBrands) {
     allBrands = await getAllBrands();
   }
-
-  // Obtener categorías con api_product_id configurado.
-  // name_keywords: variantes del rubro al final del nombre, para limpiar el sufijo.
-  const categoriesResult = await pool.query(
-    "SELECT id, category_name, api_product_id, name_keywords FROM categories WHERE api_product_id IS NOT NULL AND is_active = true",
-  );
-  const categories = categoriesResult.rows;
+  if (!categories) {
+    categories = await getSyncCategories();
+  }
 
   if (categories.length === 0) {
     console.log("No hay categorías con api_product_id configurado");
@@ -237,7 +245,7 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
 
   // Recopilar productos de cada categoría junto con su category_id.
   // Se aplica REQUEST_DELAY_MS entre requests para no saturar al proveedor externo.
-  const rawProducts = [];
+  let rawProducts = [];
   // Dedupe por external_id (OBLIGATORIO, no es una optimización).
   // Hay productos que la API devuelve por DOS rubros a la vez (doble padre).
   // Sin blindaje cada pasada los mandaba a un grupo distinto, así que no se
@@ -269,7 +277,8 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
         `  [${branch.name}] Categoría ${category.category_name}: ${products.length} productos`,
       );
       for (const p of products) {
-        const { externalId, productName } = extractApiFields(p);
+        const fields = extractApiFields(p);
+        const { externalId, productName } = fields;
 
         // Categoría efectiva: la que declara el sufijo del nombre le gana a la
         // del rubro consultado. null = el nombre no declara rubro conocido →
@@ -303,7 +312,7 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
         rawProducts.push({
           // Normalizado aca: persistBranchStock recibe campos ya extraidos,
           // no el crudo de la API, para que el CSV pueda alimentarlo igual.
-          fields: extractApiFields(p),
+          fields,
           categoryId: effective.id,
           categoryName: effective.category_name,
           nameKeywords: effective.name_keywords || [],
@@ -340,9 +349,7 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null) {
   let preservedCategoryIds = null; // null = reset total (todos respondieron)
   if (failedCategoryIds.size > 0) {
     const before = rawProducts.length;
-    for (let i = rawProducts.length - 1; i >= 0; i--) {
-      if (failedCategoryIds.has(rawProducts[i].categoryId)) rawProducts.splice(i, 1);
-    }
+    rawProducts = rawProducts.filter((row) => !failedCategoryIds.has(row.categoryId));
     const preservedNames = categories
       .filter((c) => failedCategoryIds.has(c.id))
       .map((c) => c.category_name);
@@ -860,9 +867,12 @@ async function persistBranchStock(branch, rows, opts = {}) {
  * @returns {Array} Resultados por sucursal
  */
 async function syncAllBranches() {
-  // Obtener marcas una sola vez para reutilizar entre sucursales.
-  const groupableBrands = await getGroupableBrands();
-  const allBrands = await getAllBrands();
+  // Marcas y categorías una sola vez para reutilizar entre sucursales.
+  const [groupableBrands, allBrands, categories] = await Promise.all([
+    getGroupableBrands(),
+    getAllBrands(),
+    getSyncCategories(),
+  ]);
 
   // Obtener sucursales con códigos de API configurados
   const branchesResult = await pool.query(
@@ -894,7 +904,7 @@ async function syncAllBranches() {
     const branchStartTs = Date.now();
     try {
       console.log(`→ Iniciando: ${branch.name}`);
-      const stats = await syncBranch(branch, groupableBrands, allBrands);
+      const stats = await syncBranch(branch, groupableBrands, allBrands, categories);
       const branchElapsed = Date.now() - branchStartTs;
       console.log(
         `✓ ${branch.name}: ${stats.synced} productos, ${stats.grouped} grupos, ${stats.errors} errores [${formatDuration(branchElapsed)}]`,

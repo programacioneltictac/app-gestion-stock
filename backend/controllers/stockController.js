@@ -4,6 +4,7 @@ const Branch = require("../models/Branch");
 const Category = require("../models/Category");
 const { canAccessBranch, getBranchId } = require("../middlewares/auth");
 const { handleControllerError } = require("../utils/errorHelper");
+const { parsePositiveInt } = require("../utils/pagination");
 const { pool } = require("../database/config");
 
 const getCurrentPeriod = () => {
@@ -253,7 +254,8 @@ const getOpenOrdersCount = async (req, res) => {
 // GET /api/stock/monthly-control/history
 const getMonthlyControlHistory = async (req, res) => {
   try {
-    const { branch_id: requestedBranchId, limit = 12 } = req.query;
+    const { branch_id: requestedBranchId } = req.query;
+    const limit = parsePositiveInt(req.query.limit, 12);
     const branchId = getBranchId(req.user, requestedBranchId ? parseInt(requestedBranchId) : null);
 
     if (!canAccessBranch(req.user, branchId)) {

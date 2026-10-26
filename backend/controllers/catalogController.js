@@ -3,12 +3,13 @@ const Category = require("../models/Category");
 const Condition = require("../models/Condition");
 const Brand = require("../models/Brand");
 const { handleControllerError } = require("../utils/errorHelper");
+const { parsePositiveInt } = require("../utils/pagination");
 
 // GET /api/stock/catalogs/products
 const getProducts = async (req, res) => {
   try {
-    const { search, limit = 10000 } = req.query;
-    const products = await Product.search(search, limit);
+    const { search } = req.query;
+    const products = await Product.search(search, parsePositiveInt(req.query.limit, 10000));
     res.json({
       status: "success",
       products: products,
@@ -57,10 +58,10 @@ const getBrands = async (req, res) => {
 // GET /api/stock/catalogs/brands/list - listado paginado para UI
 const getBrandsList = async (req, res) => {
   try {
-    const { page = 1, pageSize = 100, search } = req.query;
+    const { search } = req.query;
     const result = await Brand.findAllPaginated({
-      page: parseInt(page),
-      pageSize: parseInt(pageSize),
+      page: parsePositiveInt(req.query.page, 1, Number.MAX_SAFE_INTEGER),
+      pageSize: parsePositiveInt(req.query.pageSize, 100),
       searchTerm: search || null,
     });
     res.json({ status: "success", ...result });

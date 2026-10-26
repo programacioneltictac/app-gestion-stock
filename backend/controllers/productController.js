@@ -1,5 +1,6 @@
 const Product = require("../models/Product");
 const { handleControllerError } = require("../utils/errorHelper");
+const { parsePositiveInt } = require("../utils/pagination");
 
 // POST /api/stock/products/register
 const register = async (req, res) => {
@@ -34,8 +35,6 @@ const register = async (req, res) => {
 const getAll = async (req, res) => {
   try {
     const {
-      page = 1,
-      pageSize = 100,
       sortField = 'product_name',
       sortOrder = 'asc',
       search,
@@ -44,8 +43,8 @@ const getAll = async (req, res) => {
     } = req.query;
 
     const result = await Product.findAllPaginated({
-      page: parseInt(page),
-      pageSize: parseInt(pageSize),
+      page: parsePositiveInt(req.query.page, 1, Number.MAX_SAFE_INTEGER),
+      pageSize: parsePositiveInt(req.query.pageSize, 100),
       sortField,
       sortOrder,
       searchTerm: search,
@@ -67,7 +66,8 @@ const getAll = async (req, res) => {
 // GET /api/stock/products/search - Buscar productos
 const search = async (req, res) => {
   try {
-    const { q: searchTerm, limit = 50 } = req.query;
+    const { q: searchTerm } = req.query;
+    const limit = parsePositiveInt(req.query.limit, 50);
 
     if (!searchTerm) {
       return res.status(400).json({

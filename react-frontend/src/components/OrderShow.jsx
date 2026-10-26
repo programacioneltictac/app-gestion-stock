@@ -43,7 +43,6 @@ import {
 } from '../data/orders';
 import PageContainer from './PageContainer';
 import ActionButton from './ActionButton';
-import { exportOrderToExcel } from '../utils/orderExcel';
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(value);
@@ -326,6 +325,8 @@ export default function OrderShow() {
   const handleDownloadExcel = React.useCallback(async () => {
     if (!order) return;
     try {
+      // exceljs se descarga recién al exportar: no pesa en la carga inicial.
+      const { exportOrderToExcel } = await import('../utils/orderExcel');
       await exportOrderToExcel(order, items);
     } catch (err) {
       notifications.show(`Error al generar el Excel: ${err.message}`, { severity: 'error', autoHideDuration: 4000 });
