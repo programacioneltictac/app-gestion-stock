@@ -976,6 +976,7 @@ module.exports = {
   syncAllBranches,
   syncBranch,
   persistBranchStock,
+  extractApiFields,
   fetchProductsFromApi,
   getGroupableBrands,
   getAllBrands,
