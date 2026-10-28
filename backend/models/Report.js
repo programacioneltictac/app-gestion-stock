@@ -7,18 +7,22 @@ const {
   // Reserva viva del Hub: excluye AMBOS terminales (ver utils/orderStatus.js).
   LIVE_RESERVATION_SQL,
 } = require("../utils/orderStatus");
-const { CONDITION, STOCK_STATUS } = require("../utils/domainConstants");
+const { STOCK_STATUS } = require("../utils/domainConstants");
+// Criterios compartidos con el dashboard (Alert.js): mismos números en ambos.
+const {
+  ACTIVE_CONTROL_SQL,
+  COMPLIANCE_EXPR,
+  MUY_PRIORITARIO_PENDING_SQL,
+  REPLENISHABLE_PENDING_SQL,
+  DISCONTINUED_JOINS_SQL,
+  DISCONTINUED_WHERE_SQL,
+  CYCLE_DAYS_EXPR,
+  CLOSED_IN_WINDOW_SQL,
+} = require("./queries/dashboardCriteria");
 
 // No hay umbral de "orden trabada": los plazos de entrega varían mucho según el
 // proveedor y ese criterio se maneja internamente. El informe lista las órdenes
 // externas abiertas con su antigüedad y deja la lectura a quien lo interpreta.
-
-// Compliance de un ítem de control (require = 0 => 100). Misma fórmula que
-// MonthlyControl.getStats, para que el informe coincida con la pantalla.
-const COMPLIANCE_EXPR = `CASE
-  WHEN sc.stock_require = 0 THEN 100
-  ELSE (sc.stock_current::numeric / sc.stock_require::numeric) * 100
-END`;
 
 /**
  * Informe de SITUACIÓN ACTUAL: foto agregada del estado del negocio.
@@ -72,7 +76,7 @@ class Report {
          FROM monthly_controls mc
          JOIN branches b        ON mc.branch_id = b.id
          JOIN stock_controls sc ON sc.monthly_control_id = mc.id
-         WHERE mc.status IN ('draft', 'completed') ${mcBranch}
+         WHERE ${ACTIVE_CONTROL_SQL} ${mcBranch}
          GROUP BY mc.branch_id, b.name, b.is_hub
          ORDER BY avg_compliance ASC, b.name`,
         params
@@ -92,10 +96,8 @@ class Report {
          JOIN branches b          ON mc.branch_id = b.id
          LEFT JOIN product_stock_by_branch psb ON psb.id = sc.product_stock_id
          LEFT JOIN products p                  ON psb.product_id = p.id
-         WHERE sc.stock_status_id = ${STOCK_STATUS.NEED_ORDER}
-           AND sc.condition_id = ${CONDITION.MUY_PRIORITARIO}
-           AND sc.ordered_at IS NULL
-           AND mc.status IN ('draft', 'completed')
+         WHERE ${MUY_PRIORITARIO_PENDING_SQL}
+           AND ${ACTIVE_CONTROL_SQL}
            ${mcBranch}
          GROUP BY mc.branch_id, b.name
          ORDER BY value DESC, b.name`,
@@ -114,26 +116,8 @@ class Report {
                 SUM(psb.stock * ${COST_EXPR}) AS value
          FROM monthly_controls mc
          JOIN branches b ON mc.branch_id = b.id
-         JOIN product_stock_by_branch psb
-              ON psb.branch_id = mc.branch_id AND psb.stock > 0
-         LEFT JOIN products p        ON psb.product_id = p.id
-         LEFT JOIN product_groups pg ON psb.group_id = pg.id
-         LEFT JOIN categories cg     ON pg.category_type = cg.category_name
-         WHERE mc.status IN ('draft', 'completed')
-           AND ( p.category_id = mc.category_id OR cg.id = mc.category_id )
-           AND NOT EXISTS (
-             SELECT 1 FROM stock_controls sc
-             WHERE sc.monthly_control_id = mc.id AND sc.product_stock_id = psb.id
-           )
-           AND NOT EXISTS (
-             SELECT 1 FROM brand_trials bt
-             WHERE bt.status = 'en_prueba'
-               AND bt.branch_id = psb.branch_id
-               AND bt.brand_id = COALESCE(pg.brand_id, p.brand_id)
-               AND (bt.category_id IS NULL OR bt.category_id = mc.category_id)
-           )
-           -- Excluir productos PROMO (se ven aparte), igual que findDiscontinued.
-           AND NOT COALESCE(p.is_promo, false)
+         ${DISCONTINUED_JOINS_SQL}
+         WHERE ${DISCONTINUED_WHERE_SQL}
            ${mcBranch}
          GROUP BY mc.branch_id, b.name
          HAVING SUM(psb.stock * ${COST_EXPR}) > 0
@@ -209,19 +193,18 @@ class Report {
       //    'cancelado' queda afuera: no completó el ciclo.
       pool.query(
         `SELECT
-           ROUND(AVG(EXTRACT(EPOCH FROM (oc.finalized_at - oc.created_at)) / 86400)
+           ROUND(AVG(${CYCLE_DAYS_EXPR})
                  FILTER (WHERE oc.order_type = 'external'))::int AS avg_days_supplier,
-           ROUND(AVG(EXTRACT(EPOCH FROM (oc.finalized_at - oc.created_at)) / 86400)
+           ROUND(AVG(${CYCLE_DAYS_EXPR})
                  FILTER (WHERE oc.order_type = 'internal'))::int AS avg_days_hub,
-           MAX(EXTRACT(EPOCH FROM (oc.finalized_at - oc.created_at)) / 86400)
+           MAX(${CYCLE_DAYS_EXPR})
                  FILTER (WHERE oc.order_type = 'external')::int  AS max_days_supplier,
-           MAX(EXTRACT(EPOCH FROM (oc.finalized_at - oc.created_at)) / 86400)
+           MAX(${CYCLE_DAYS_EXPR})
                  FILTER (WHERE oc.order_type = 'internal')::int  AS max_days_hub,
            COUNT(*) FILTER (WHERE oc.order_type = 'external')    AS closed_supplier,
            COUNT(*) FILTER (WHERE oc.order_type = 'internal')    AS closed_hub
          FROM orders_controls oc
-         WHERE oc.status = 'finalizado'
-           AND oc.finalized_at >= NOW() - INTERVAL '30 days' ${ocBranch}`,
+         WHERE ${CLOSED_IN_WINDOW_SQL} ${ocBranch}`,
         params
       ),
 
@@ -290,10 +273,8 @@ class Report {
          LEFT JOIN categories c   ON mc.category_id = c.id
          LEFT JOIN product_stock_by_branch psb ON psb.id = sc.product_stock_id
          LEFT JOIN products p                  ON psb.product_id = p.id
-         WHERE sc.stock_status_id = ${STOCK_STATUS.NEED_ORDER}
-           AND sc.ordered_at IS NULL
-           AND sc.condition_id IS DISTINCT FROM ${CONDITION.NON_REPLENISHABLE}
-           AND mc.status IN ('draft', 'completed')
+         WHERE ${REPLENISHABLE_PENDING_SQL}
+           AND ${ACTIVE_CONTROL_SQL}
            ${mcBranch}
          GROUP BY c.category_name
          ORDER BY value DESC`,

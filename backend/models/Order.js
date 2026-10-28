@@ -14,6 +14,42 @@ const { CONDITION, STOCK_STATUS } = require("../utils/domainConstants");
 // react-frontend/src/data/orders.js). El listado separa por este criterio.
 const ORDER_TERMINAL_STATUSES = ORDER_STATUSES_TERMINAL;
 
+// Libera (ordered_at = NULL, sin chip "Pedido a...") los stock_controls de
+// `controlIds` que ya no tengan NINGUNA línea en una orden viva. El filtro por
+// estado es imprescindible: sin él, una línea vieja de una orden ya
+// finalizada/cancelada bloqueaba la liberación para siempre. Respeta el caso
+// Hub: un control con línea interna + externa no se libera mientras quede una.
+// Corre en la transacción del llamador (`client`).
+const releaseControlsWithoutLiveOrder = async (client, controlIds) => {
+  if (controlIds.length === 0) return;
+  await client.query(
+    `UPDATE stock_controls sc
+     SET ordered_at      = NULL,
+         order_detail_id = NULL,
+         updated_at      = NOW()
+     WHERE sc.id = ANY($1::int[])
+       AND NOT EXISTS (
+         SELECT 1
+         FROM order_details od
+         JOIN orders_controls oc ON od.order_control_id = oc.id
+         WHERE od.stock_control_id = sc.id
+           AND ${liveOrderSql("oc")}
+       )`,
+    [controlIds]
+  );
+};
+
+// Controles (stock_control_id) con alguna línea en la orden `orderId`.
+const controlIdsOfOrder = async (client, orderId) => {
+  const result = await client.query(
+    `SELECT DISTINCT stock_control_id
+     FROM order_details
+     WHERE order_control_id = $1 AND stock_control_id IS NOT NULL`,
+    [orderId]
+  );
+  return result.rows.map((r) => r.stock_control_id);
+};
+
 // Devuelve la cláusula WHERE (sin la palabra WHERE) que filtra por grupo de
 // estado. statusGroup: 'active' (en gestión, no terminales) | 'archived'
 // (finalizadas/canceladas) | 'all' (sin filtro). Usa una lista literal segura
@@ -282,21 +318,6 @@ class Order {
         );
       };
 
-      // Helper: recalcula el total de la orden y devuelve el objeto fresco.
-      const refreshOrderTotal = async (order) => {
-        const totalResult = await client.query(
-          `UPDATE orders_controls
-           SET cost_estimate = (
-             SELECT COALESCE(SUM(cost_estimate), 0) FROM order_details WHERE order_control_id = $1
-           ),
-               updated_at = NOW()
-           WHERE id = $1
-           RETURNING *`,
-          [order.id]
-        );
-        return totalResult.rows[0];
-      };
-
       // ---- Orden INTERNA (Hub): se crea 1 por control, sin consolidar. --------
       if (internalLines.length > 0) {
         const orderResult = await client.query(
@@ -312,7 +333,7 @@ class Order {
         );
         const internalOrder = orderResult.rows[0];
         await appendLinesToOrder(internalOrder.id, internalLines, false);
-        orders.push(await refreshOrderTotal(internalOrder));
+        orders.push(await Order.recalcCostEstimate(internalOrder.id, client));
       }
 
       // ---- Ordenes EXTERNAS: CONSOLIDADAS por proveedor. ----------------------
@@ -360,7 +381,7 @@ class Order {
         }
 
         await appendLinesToOrder(order.id, lines, true);
-        orders.push(await refreshOrderTotal(order));
+        orders.push(await Order.recalcCostEstimate(order.id, client));
       }
 
       // Marcar como pedidos TODOS los stock_controls que entraron en alguna orden.
@@ -522,26 +543,7 @@ class Order {
         // Se liberan los controles que no queden con ninguna linea en una orden
         // viva. El propio cancelado de esta orden ya cuenta como "no viva", asi
         // que su sola presencia no bloquea la liberacion.
-        await client.query(
-          `UPDATE stock_controls sc
-           SET ordered_at      = NULL,
-               order_detail_id = NULL,
-               updated_at      = NOW()
-           WHERE sc.id IN (
-             SELECT DISTINCT od.stock_control_id
-             FROM order_details od
-             WHERE od.order_control_id = $1
-               AND od.stock_control_id IS NOT NULL
-           )
-           AND NOT EXISTS (
-             SELECT 1
-             FROM order_details od2
-             JOIN orders_controls oc2 ON od2.order_control_id = oc2.id
-             WHERE od2.stock_control_id = sc.id
-               AND ${liveOrderSql("oc2")}
-           )`,
-          [id]
-        );
+        await releaseControlsWithoutLiveOrder(client, await controlIdsOfOrder(client, id));
       }
 
       await client.query("COMMIT");
@@ -556,17 +558,20 @@ class Order {
 
   /**
    * Recalcula cost_estimate de la orden sumando los detalles.
+   * @returns {Promise<object|undefined>} la orden actualizada.
    */
   static async recalcCostEstimate(orderId, client = pool) {
-    await client.query(
+    const result = await client.query(
       `UPDATE orders_controls
        SET cost_estimate = (
          SELECT COALESCE(SUM(cost_estimate), 0) FROM order_details WHERE order_control_id = $1
        ),
        updated_at = NOW()
-       WHERE id = $1`,
+       WHERE id = $1
+       RETURNING *`,
       [orderId]
     );
+    return result.rows[0];
   }
 
   // ============================================================
@@ -733,37 +738,13 @@ class Order {
       // el flag "ya pedido" es stock_controls.ordered_at, y un control puede
       // tener 2 lineas (interna+externa). Solo se reabre si no le queda otra
       // linea en una orden viva.
-      const affected = await client.query(
-        `SELECT DISTINCT stock_control_id
-         FROM order_details
-         WHERE order_control_id = $1 AND stock_control_id IS NOT NULL`,
-        [id]
-      );
+      const controlIds = await controlIdsOfOrder(client, id);
 
       await client.query("DELETE FROM order_details WHERE order_control_id = $1", [id]);
       await client.query("DELETE FROM orders_controls WHERE id = $1", [id]);
 
-      const controlIds = affected.rows.map((r) => r.stock_control_id);
-      if (controlIds.length > 0) {
-        // Reabrir (ordered_at = NULL) los controles sin lineas vivas restantes.
-        // El filtro por estado es imprescindible: sin el, una linea vieja de una
-        // orden ya finalizada/cancelada bloqueaba la liberacion para siempre.
-        await client.query(
-          `UPDATE stock_controls sc
-           SET ordered_at      = NULL,
-               order_detail_id = NULL,
-               updated_at      = NOW()
-           WHERE sc.id = ANY($1::int[])
-             AND NOT EXISTS (
-               SELECT 1
-               FROM order_details od
-               JOIN orders_controls oc ON od.order_control_id = oc.id
-               WHERE od.stock_control_id = sc.id
-                 AND ${liveOrderSql("oc")}
-             )`,
-          [controlIds]
-        );
-      }
+      // Reabrir (ordered_at = NULL) los controles sin lineas vivas restantes.
+      await releaseControlsWithoutLiveOrder(client, controlIds);
 
       await client.query("COMMIT");
     } catch (err) {
@@ -819,19 +800,7 @@ class Order {
       // Reabrir el control si ya no le queda ninguna linea VIVA (respeta Hub:
       // con linea interna + externa, borrar una sola no lo reabre).
       if (stockControlId) {
-        await client.query(
-          `UPDATE stock_controls sc
-           SET ordered_at = NULL, order_detail_id = NULL, updated_at = NOW()
-           WHERE sc.id = $1
-             AND NOT EXISTS (
-               SELECT 1
-               FROM order_details od
-               JOIN orders_controls oc ON od.order_control_id = oc.id
-               WHERE od.stock_control_id = sc.id
-                 AND ${liveOrderSql("oc")}
-             )`,
-          [stockControlId]
-        );
+        await releaseControlsWithoutLiveOrder(client, [stockControlId]);
       }
 
       // Si la orden quedo vacia, eliminarla; sino recalcular su total.

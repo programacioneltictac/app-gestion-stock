@@ -4,7 +4,18 @@ const BrandTrial = require("./BrandTrial");
 // otras sucursales), compartido con el informe de situación y las órdenes.
 const { COST_EXPR } = require("../utils/costExpr");
 // Ids de condiciones (MUY PRIORITARIO / NUEVA MARCA) y de estados de stock.
-const { CONDITION, STOCK_STATUS } = require("../utils/domainConstants");
+const { STOCK_STATUS } = require("../utils/domainConstants");
+// Criterios compartidos con el informe de situación (Report.js).
+const {
+  ACTIVE_CONTROL_SQL,
+  COMPLIANCE_EXPR,
+  MUY_PRIORITARIO_PENDING_SQL,
+  REPLENISHABLE_PENDING_SQL,
+  DISCONTINUED_JOINS_SQL,
+  DISCONTINUED_WHERE_SQL,
+  CYCLE_DAYS_EXPR,
+  CLOSED_IN_WINDOW_SQL,
+} = require("./queries/dashboardCriteria");
 
 class Alert {
   /**
@@ -39,10 +50,8 @@ class Alert {
        LEFT JOIN categories c ON mc.category_id = c.id
        LEFT JOIN product_stock_by_branch psb ON psb.id = sc.product_stock_id
        LEFT JOIN products p ON psb.product_id = p.id
-       WHERE sc.stock_status_id = ${STOCK_STATUS.NEED_ORDER}
-         AND sc.condition_id = ${CONDITION.MUY_PRIORITARIO}
-         AND sc.ordered_at IS NULL
-         AND mc.status IN ('draft', 'completed')
+       WHERE ${MUY_PRIORITARIO_PENDING_SQL}
+         AND ${ACTIVE_CONTROL_SQL}
          ${branchClause}
        GROUP BY mc.id, mc.branch_id, b.name, c.category_name
        ORDER BY faltante_valor DESC, b.name`,
@@ -59,10 +68,8 @@ class Alert {
        FROM stock_controls sc
        JOIN monthly_controls mc ON sc.monthly_control_id = mc.id
        JOIN branches b ON mc.branch_id = b.id
-       WHERE sc.stock_status_id = ${STOCK_STATUS.NEED_ORDER}
-         AND sc.ordered_at IS NULL
-         AND sc.condition_id IS DISTINCT FROM ${CONDITION.NON_REPLENISHABLE}
-         AND mc.status IN ('draft', 'completed')
+       WHERE ${REPLENISHABLE_PENDING_SQL}
+         AND ${ACTIVE_CONTROL_SQL}
          ${branchClause}
        GROUP BY mc.branch_id, b.name, b.is_hub
        ORDER BY need_order_items DESC, b.name`,
@@ -91,7 +98,7 @@ class Alert {
        LEFT JOIN product_stock_by_branch psb ON psb.id = sc.product_stock_id
        LEFT JOIN products p ON psb.product_id = p.id
        WHERE sc.stock_status_id = ${STOCK_STATUS.OVERSTOCK}
-         AND mc.status IN ('draft', 'completed')
+         AND ${ACTIVE_CONTROL_SQL}
          ${branchClause}
        GROUP BY mc.id, mc.branch_id, b.name, c.category_name
        HAVING SUM((sc.stock_current - sc.stock_require) * ${COST_EXPR}) > 0
@@ -133,18 +140,15 @@ class Alert {
     //     mucho según la demanda, pero al ser un promedio POR ORDEN el volumen
     //     no distorsiona (verificado en prod: jul 50 internas/6.3d vs ago 40/1.1d).
     //
-    //     Solo 'finalizado': una orden 'cancelado' no completó el ciclo y su
-    //     demora no dice nada sobre la operatividad.
-    const cycleExpr = "EXTRACT(EPOCH FROM (oc.finalized_at - oc.created_at)) / 86400";
+    //     Solo 'finalizado' (ver CLOSED_IN_WINDOW_SQL).
     const cycleTimeQuery = pool.query(
       `SELECT
-         ROUND(AVG(${cycleExpr}) FILTER (WHERE oc.order_type = 'external'))::int AS cycle_days_supplier,
-         ROUND(AVG(${cycleExpr}) FILTER (WHERE oc.order_type = 'internal'))::int AS cycle_days_hub,
+         ROUND(AVG(${CYCLE_DAYS_EXPR}) FILTER (WHERE oc.order_type = 'external'))::int AS cycle_days_supplier,
+         ROUND(AVG(${CYCLE_DAYS_EXPR}) FILTER (WHERE oc.order_type = 'internal'))::int AS cycle_days_hub,
          COUNT(*) FILTER (WHERE oc.order_type = 'external')                      AS closed_supplier,
          COUNT(*) FILTER (WHERE oc.order_type = 'internal')                      AS closed_hub
        FROM orders_controls oc
-       WHERE oc.status = 'finalizado'
-         AND oc.finalized_at >= NOW() - INTERVAL '30 days' ${ordersBranchClause}`,
+       WHERE ${CLOSED_IN_WINDOW_SQL} ${ordersBranchClause}`,
       params
     );
 
@@ -161,30 +165,8 @@ class Alert {
        FROM monthly_controls mc
        JOIN branches b   ON mc.branch_id = b.id
        LEFT JOIN categories c ON mc.category_id = c.id
-       JOIN product_stock_by_branch psb
-            ON psb.branch_id = mc.branch_id AND psb.stock > 0
-       LEFT JOIN products p        ON psb.product_id = p.id
-       LEFT JOIN product_groups pg ON psb.group_id = pg.id
-       LEFT JOIN categories cg     ON pg.category_type = cg.category_name
-       WHERE mc.status IN ('draft', 'completed')
-         AND ( p.category_id = mc.category_id OR cg.id = mc.category_id )
-         AND NOT EXISTS (
-           SELECT 1 FROM stock_controls sc
-           WHERE sc.monthly_control_id = mc.id AND sc.product_stock_id = psb.id
-         )
-         -- Excluir marcas con una prueba EN PRUEBA en esta sucursal/rubro: se
-         -- gestionan aparte (Marcas a prueba), NO son discontinuo todavía. Mismo
-         -- criterio que StockControl.findDiscontinued, para que el valor del
-         -- dashboard coincida con el del listado del control.
-         AND NOT EXISTS (
-           SELECT 1 FROM brand_trials bt
-           WHERE bt.status = 'en_prueba'
-             AND bt.branch_id = psb.branch_id
-             AND bt.brand_id = COALESCE(pg.brand_id, p.brand_id)
-             AND (bt.category_id IS NULL OR bt.category_id = mc.category_id)
-         )
-         -- Excluir productos PROMO (se ven aparte), igual que findDiscontinued.
-         AND NOT COALESCE(p.is_promo, false)
+       ${DISCONTINUED_JOINS_SQL}
+       WHERE ${DISCONTINUED_WHERE_SQL}
          ${branchClause}
        GROUP BY mc.id, mc.branch_id, b.name, c.category_name
        HAVING SUM(psb.stock * ${COST_EXPR}) > 0
@@ -196,15 +178,10 @@ class Alert {
     //    controles activos draft+completed (todas las sucursales y rubros). Misma
     //    fórmula que MonthlyControl.avg_compliance (require=0 => 100). Foto del estado actual.
     const avgComplianceQuery = pool.query(
-      `SELECT ROUND(AVG(
-                CASE
-                  WHEN sc.stock_require = 0 THEN 100
-                  ELSE (sc.stock_current::numeric / sc.stock_require::numeric) * 100
-                END
-              ))::int AS avg_compliance
+      `SELECT ROUND(AVG(${COMPLIANCE_EXPR}))::int AS avg_compliance
        FROM stock_controls sc
        JOIN monthly_controls mc ON sc.monthly_control_id = mc.id
-       WHERE mc.status IN ('draft', 'completed') ${branchClause}`,
+       WHERE ${ACTIVE_CONTROL_SQL} ${branchClause}`,
       params
     );
 
