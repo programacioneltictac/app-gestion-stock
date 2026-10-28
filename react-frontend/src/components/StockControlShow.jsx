@@ -1,15 +1,11 @@
 import * as React from "react";
 import Alert from "@mui/material/Alert";
-import Autocomplete from "@mui/material/Autocomplete";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
-import CircularProgress from "@mui/material/CircularProgress";
-import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
 import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
-import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { DataGrid, GridActionsCellItem } from "@mui/x-data-grid";
@@ -22,60 +18,35 @@ import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import ArchiveIcon from "@mui/icons-material/Archive";
 import LockOpenIcon from "@mui/icons-material/LockOpen";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
-import { useParams, useNavigate, useSearchParams, useLocation } from "react-router";
+import { useParams, useNavigate, useLocation } from "react-router";
 import { useDialogs } from "../hooks/useDialogs/useDialogs";
 import useNotifications from "../hooks/useNotifications/useNotifications";
+import useQueryParams from "../hooks/useQueryParams";
 import { useAuth } from "../context/AuthContext";
 import {
-  getStockItems,
-  upsertStockItem,
   deleteStockItem,
   completeMonthlyControl,
   discontinueMonthlyControl,
   reopenMonthlyControl,
   getOpenOrdersCount,
-  getAvailableProducts,
-  getConditions,
-  getControlById,
-  getDiscontinuedProducts,
-  getPromoProducts,
 } from "../data/stock";
 import { createOrderFromControl } from "../data/orders";
 import PageContainer from "./PageContainer";
 import { CONDITION, STOCK_STATUS } from "../constants";
-import { formatCurrency, formatDateTime } from "../utils/format";
 import ActionButton from "./ActionButton";
-
-const STOCK_STATUS_COLOR = { 1: "error", 2: "success", 3: "warning", 4: "warning" };
-
-// ¿Este ítem se puede pedir? Debe estar en "Generar Pedido", no haber sido
-// ya pedido, y no ser 'NUEVA MARCA' (CONDITION.NON_REPLENISHABLE).
-const isOrderable = (item) =>
-  item.stockStatusId === STOCK_STATUS.NEED_ORDER &&
-  !item.orderedAt &&
-  item.conditionId !== CONDITION.NON_REPLENISHABLE;
-
-// Etiqueta de la píldora "ya pedido" según el destino de la orden.
-// 'awaiting_sync': la mercadería ya se recibió (orden finalizada) pero el sync
-// todavía no actualizó el stock, así que el ítem sigue figurando en "Generar
-// Pedido". Se avisa explícitamente para que nadie lo vuelva a pedir; el chip
-// desaparece solo cuando el sync confirme el stock real.
-const ORDER_DEST_LABELS = {
-  hub:           { label: "Pedido a Hub",           color: "info",      tooltip: "Pedido al Nodo Hub (orden interna)" },
-  external:      { label: "Pedido a proveedor",     color: "secondary", tooltip: "Pedido a proveedor (orden externa)" },
-  both:          { label: "Pedido (Hub+proveedor)", color: "primary",   tooltip: "Pedido parcial al Hub y el resto a proveedor" },
-  awaiting_sync: { label: "Recibido, esperando sync", color: "success", tooltip: "La mercadería ya se recibió. El stock se actualiza en la próxima sincronización: NO hace falta volver a pedirlo" },
-  default:       { label: "Pedido",                 color: "info",      tooltip: "Ya enviado a una orden de reposición" },
-};
-
-
-// Chips de estado del panel superior. El id es stock_status_id (1 generar
-// pedido, 2 optimo, 3 sobrestock) y statKey el campo del resumen que muestran.
-const STATUS_CHIPS = [
-  { id: 1, label: "En falta", color: "error", statKey: "needOrder" },
-  { id: 2, label: "Óptimo", color: "success", statKey: "optimal" },
-  { id: 3, label: "Sobrestock", color: "warning", statKey: "excess" },
-];
+import {
+  STOCK_STATUS_COLOR,
+  ORDER_DEST_LABELS,
+  isOrderable,
+  isUnmanaged,
+} from "./stockControl/stockControlShared";
+import useStockControlData from "./stockControl/useStockControlData";
+import useStockControlFilters from "./stockControl/useStockControlFilters";
+import useStockItemForm from "./stockControl/useStockItemForm";
+import StockControlStatsBar from "./stockControl/StockControlStatsBar";
+import StockItemForm from "./stockControl/StockItemForm";
+import OrderSelectionBar from "./stockControl/OrderSelectionBar";
+import ValuedProductsGrid from "./stockControl/ValuedProductsGrid";
 
 export default function StockControlShow() {
   const { branchId, controlId } = useParams();
@@ -90,21 +61,29 @@ export default function StockControlShow() {
   // backend/routes/stock.js y orders.js.
   const isAdmin = hasRole("admin");
 
-  const [control, setControl] = React.useState(null);
-  const [items, setItems] = React.useState([]);
-  const [lastSyncAt, setLastSyncAt] = React.useState(null);
-  const [availableProducts, setAvailableProducts] = React.useState([]);
-  const [conditions, setConditions] = React.useState([]);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [error, setError] = React.useState(null);
+  const {
+    control,
+    items,
+    lastSyncAt,
+    availableProducts,
+    conditions,
+    isLoading,
+    error,
+    loadData,
+    reloadItems,
+    removeItem,
+    discontinued,
+    discLoaded,
+    isLoadingDisc,
+    loadDiscontinued,
+    promo,
+    promoLoaded,
+    isLoadingPromo,
+    loadPromo,
+  } = useStockControlData(branchId, controlId, notifications);
 
-  // Inline add/edit form state. editingItemId != null => modo edición de un
-  // ítem ya cargado (recupera producto/condición/stock mínimo en el form).
-  const [selectedProduct, setSelectedProduct] = React.useState(null);
-  const [selectedCondition, setSelectedCondition] = React.useState("");
-  const [stockRequire, setStockRequire] = React.useState("");
-  const [isSaving, setIsSaving] = React.useState(false);
-  const [editingItemId, setEditingItemId] = React.useState(null);
+  const form = useStockItemForm(controlId, reloadItems, notifications);
+  const { handleEditItem } = form;
 
   // Selección de ítems para generar orden parcial
   const [selectionModel, setSelectionModel] = React.useState([]);
@@ -114,185 +93,19 @@ export default function StockControlShow() {
   // (ambas solo lectura). Vive en la URL (?tab=discontinued) para que sobreviva a una recarga y para
   // que el "Volver" de la lista de controles pueda restituirla. También es el
   // acceso directo desde el dashboard (tarjeta de stock discontinuo).
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, updateParams] = useQueryParams();
   const tabParam = searchParams.get("tab");
   const activeTab = tabParam === "discontinued" || tabParam === "promo" ? tabParam : "control";
 
-  // Filtro de llegada desde el dashboard. TODOS los modos se traducen a chips
-  // encendidos (ninguno es un modo aparte con banner), para que los accesos
-  // desde el dashboard se vean y se apaguen siempre igual:
-  //  - "needorder":      chip "En falta" (status 1).
-  //  - "overstock":      chip "Sobrestock" (status 3).
-  //  - "muyprioritario": "En falta" + condición MUY PRIORITARIO + "Sin gestionar",
-  //    que juntos reproducen exactamente lo que cuenta la tarjeta del dashboard
-  //    (status 1 + condición 3 + ordered_at NULL), para que el número del
-  //    control coincida con el de la tarjeta.
-  // El recorte vive en la URL: al apagar un chip se limpia ?filter y al volver
-  // desde otra pantalla el control reaparece con el mismo recorte.
-  const filterFromUrl = searchParams.get("filter");
-
-  // Chips de estado del panel superior. Multi-seleccion: se pueden ver "En
-  // falta" y "Sobrestock" a la vez. Vacio = sin filtrar (chip "Total" activo).
-  const [statusFilter, setStatusFilter] = React.useState(() => {
-    // "muyprioritario" tambien parte de "En falta": los tres chips juntos
-    // (estado + condicion + sin gestionar) dan el mismo recorte que la tarjeta.
-    if (filterFromUrl === "needorder" || filterFromUrl === "muyprioritario") return [1];
-    if (filterFromUrl === "overstock") return [3];
-    return [];
-  });
-  // Chip aparte para los faltantes reponibles todavia sin pedir: no es un
-  // estado, es un cruce (status 1 + reponible + sin orden).
-  const [unmanagedOnly, setUnmanagedOnly] = React.useState(
-    () => filterFromUrl === "muyprioritario"
-  );
-  // Chips de condicion. Se cruzan con los de estado (AND): "En falta" +
-  // "MUY PRIORITARIO" muestra los faltantes muy prioritarios.
-  const [conditionFilter, setConditionFilter] = React.useState(() =>
-    filterFromUrl === "muyprioritario" ? [CONDITION.MUY_PRIORITARIO] : []
-  );
-
-  // Al tocar cualquier chip se limpia ?filter de la URL: si se llego desde el
-  // dashboard con "needorder", ese parametro ya cumplio su funcion (encender
-  // "En falta") y dejarlo haria que un refresh reviviera un filtro que el
-  // usuario acaba de cambiar a mano.
-  const dropFilterParam = React.useCallback(() => {
-    if (!searchParams.get("filter")) return;
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("filter");
-        return next;
-      },
-      { replace: true }
-    );
-  }, [searchParams, setSearchParams]);
-
-  const toggleStatusFilter = React.useCallback(
-    (statusId) => {
-      setStatusFilter((prev) => {
-        const next = prev.includes(statusId)
-          ? prev.filter((s) => s !== statusId)
-          : [...prev, statusId];
-        // "Sin gestionar" ya implica "En falta". Cruzarlo con Optimo o
-        // Sobrestock daria siempre 0 filas, asi que al elegir un estado que no
-        // sea el 1 se apaga, en vez de dejar la tabla vacia sin explicacion.
-        if (next.some((sid) => sid !== 1)) setUnmanagedOnly(false);
-        return next;
-      });
-      dropFilterParam();
-    },
-    [dropFilterParam]
-  );
-
-  const toggleConditionFilter = React.useCallback(
-    (conditionId) => {
-      setConditionFilter((prev) =>
-        prev.includes(conditionId) ? prev.filter((c) => c !== conditionId) : [...prev, conditionId]
-      );
-      // No apaga "Sin gestionar": condicion y sin-gestionar se cruzan sin
-      // contradecirse ("los PRIORITARIOS que faltan por pedir").
-      dropFilterParam();
-    },
-    [dropFilterParam]
-  );
-
-  const clearAllFilters = React.useCallback(() => {
-    setStatusFilter([]);
-    setConditionFilter([]);
-    setUnmanagedOnly(false);
-    dropFilterParam();
-  }, [dropFilterParam]);
-
-  const noFiltersActive =
-    statusFilter.length === 0 && conditionFilter.length === 0 && !unmanagedOnly;
-
-  const [discontinued, setDiscontinued] = React.useState([]);
-  const [discLoaded, setDiscLoaded] = React.useState(false);
-  const [isLoadingDisc, setIsLoadingDisc] = React.useState(false);
-
-  const [promo, setPromo] = React.useState([]);
-  const [promoLoaded, setPromoLoaded] = React.useState(false);
-  const [isLoadingPromo, setIsLoadingPromo] = React.useState(false);
-
-  const loadData = React.useCallback(async () => {
-    setError(null);
-    setIsLoading(true);
-    try {
-      // El control trae su rubro (categoryId), necesario para filtrar el catálogo.
-      const controlData = await getControlById(Number(controlId));
-      if (!controlData) throw new Error("Control no encontrado");
-
-      const [itemsData, productsData, conditionsData] = await Promise.all([
-        getStockItems(Number(controlId)),
-        getAvailableProducts(Number(branchId), controlData.categoryId),
-        getConditions(),
-      ]);
-      setControl(controlData);
-      setItems(itemsData.items);
-      setLastSyncAt(itemsData.lastSyncAt);
-      setAvailableProducts(productsData);
-      setConditions(conditionsData);
-    } catch (loadError) {
-      setError(loadError);
-    }
-    setIsLoading(false);
-  }, [branchId, controlId]);
-
-  React.useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const [isExporting, setIsExporting] = React.useState(false);
-
-  // Carga (lazy) de discontinuos: solo la primera vez que se entra a la tab.
-  // Devuelve el array cargado (lo usa también la exportación a Excel).
-  const loadDiscontinued = React.useCallback(async () => {
-    setIsLoadingDisc(true);
-    try {
-      const data = await getDiscontinuedProducts(Number(controlId));
-      setDiscontinued(data);
-      setDiscLoaded(true);
-      return data;
-    } catch (err) {
-      notifications.show(`Error al cargar discontinuos: ${err.message}`, {
-        severity: "error",
-        autoHideDuration: 4000,
-      });
-      throw err;
-    } finally {
-      setIsLoadingDisc(false);
-    }
-  }, [controlId, notifications]);
-
-  // Carga (lazy) de productos PROMO: solo la primera vez que se entra a la tab.
-  const loadPromo = React.useCallback(async () => {
-    setIsLoadingPromo(true);
-    try {
-      const data = await getPromoProducts(Number(controlId));
-      setPromo(data);
-      setPromoLoaded(true);
-    } catch (err) {
-      notifications.show(`Error al cargar promo: ${err.message}`, {
-        severity: "error",
-        autoHideDuration: 4000,
-      });
-    } finally {
-      setIsLoadingPromo(false);
-    }
-  }, [controlId, notifications]);
+  // Chips de filtro y filtro de llegada desde el dashboard (?filter=).
+  const filters = useStockControlFilters(items, searchParams, updateParams);
+  const { visibleItems, noFiltersActive, clearAllFilters } = filters;
 
   const handleChangeTab = React.useCallback((_, val) => {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.set("tab", val);
-        return next;
-      },
-      { replace: true }
-    );
+    updateParams({ tab: val }, { replace: true });
     if (val === "discontinued" && !discLoaded) loadDiscontinued();
     if (val === "promo" && !promoLoaded) loadPromo();
-  }, [discLoaded, loadDiscontinued, promoLoaded, loadPromo, setSearchParams]);
+  }, [discLoaded, loadDiscontinued, promoLoaded, loadPromo, updateParams]);
 
   // Si se entró directo en la tab de discontinuos o promo (?tab=...), dispara la
   // carga lazy una vez al montar.
@@ -301,6 +114,8 @@ export default function StockControlShow() {
     if (activeTab === "promo" && !promoLoaded) loadPromo();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const [isExporting, setIsExporting] = React.useState(false);
 
   // "Volver" respeta de dónde se entró: si el origen mandó un destino explícito
   // (p. ej. el dashboard, vía state), se vuelve ahí; si no, a la lista de
@@ -329,57 +144,6 @@ export default function StockControlShow() {
     setIsExporting(false);
   }, [control, items, discontinued, discLoaded, loadDiscontinued, notifications]);
 
-  const handleUpsertItem = React.useCallback(async () => {
-    if (!selectedProduct || stockRequire === "" || Number(stockRequire) < 0) return;
-
-    setIsSaving(true);
-    try {
-      await upsertStockItem(Number(controlId), selectedProduct.ref, Number(stockRequire), selectedCondition || null);
-      // Si era un producto del catálogo global, ahora ya existe en la sucursal:
-      // recargamos el catálogo para que pase a la lista local.
-      const [itemsData, productsData] = await Promise.all([
-        getStockItems(Number(controlId)),
-        selectedProduct.isGlobal ? getAvailableProducts(Number(branchId), control.categoryId) : Promise.resolve(null),
-      ]);
-      setItems(itemsData.items);
-      setLastSyncAt(itemsData.lastSyncAt);
-      if (productsData) setAvailableProducts(productsData);
-      setSelectedProduct(null);
-      setSelectedCondition("");
-      setStockRequire("");
-      setEditingItemId(null);
-    } catch (err) {
-      notifications.show(`Error al guardar: ${err.message}`, {
-        severity: "error",
-        autoHideDuration: 4000,
-      });
-    }
-    setIsSaving(false);
-  }, [selectedProduct, stockRequire, selectedCondition, controlId, branchId, control, notifications]);
-
-  // Edición: recupera un ítem ya cargado en el mismo formulario de alta. El
-  // upsert del backend (ON CONFLICT por product_stock_id) lo actualiza en vez
-  // de duplicar. Se construye un selectedProduct sintético con la ref del psb
-  // (el ítem ya existe en la sucursal). No editable si ya fue pedido (ordered_at).
-  const handleEditItem = React.useCallback((item) => {
-    setEditingItemId(item.id);
-    setSelectedProduct({
-      key: `edit-${item.productStockId}`,
-      displayName: item.displayName,
-      isGlobal: false,
-      ref: { productStockId: item.productStockId },
-    });
-    setSelectedCondition(item.conditionId || "");
-    setStockRequire(String(item.stockRequire));
-  }, []);
-
-  const handleCancelEdit = React.useCallback(() => {
-    setEditingItemId(null);
-    setSelectedProduct(null);
-    setSelectedCondition("");
-    setStockRequire("");
-  }, []);
-
   const handleDeleteItem = React.useCallback(
     (item) => async () => {
       const confirmed = await dialogs.confirm(
@@ -394,7 +158,7 @@ export default function StockControlShow() {
       if (confirmed) {
         try {
           await deleteStockItem(item.id);
-          setItems((prev) => prev.filter((i) => i.id !== item.id));
+          removeItem(item.id);
         } catch (err) {
           notifications.show(`Error al eliminar: ${err.message}`, {
             severity: "error",
@@ -403,7 +167,7 @@ export default function StockControlShow() {
         }
       }
     },
-    [dialogs, notifications]
+    [dialogs, notifications, removeItem]
   );
 
   const handleGenerateOrder = React.useCallback(async () => {
@@ -654,99 +418,6 @@ export default function StockControlShow() {
     [control, handleDeleteItem, handleEditItem, isAdmin]
   );
 
-  // Columnas de las tablas de discontinuos y promo (solo lectura): Producto, Rubro,
-  // Stock, Costo unit., Total valorizado (= stock * costo unit.).
-  const discontinuedColumns = React.useMemo(
-    () => [
-      { field: "displayName", headerName: "Producto", flex: 1, minWidth: 220 },
-      { field: "categoryName", headerName: "Rubro", width: 130 },
-      { field: "stock", headerName: "Stock", width: 100, type: "number" },
-      {
-        field: "avgCost",
-        headerName: "Costo unit.",
-        width: 130,
-        type: "number",
-        renderCell: ({ value }) => (
-          <Box sx={{ display: "flex", alignItems: "center", height: "100%" }}>
-            <Typography variant="body2">{value > 0 ? formatCurrency(value) : "-"}</Typography>
-          </Box>
-        ),
-      },
-      {
-        field: "totalValue",
-        headerName: "Total valorizado",
-        width: 150,
-        type: "number",
-        // stock * costo unit. (del sync). Se calcula de la fila, no viene del backend.
-        valueGetter: (_value, row) => (Number(row.stock) || 0) * (Number(row.avgCost) || 0),
-        renderCell: ({ value }) => (
-          <Box sx={{ display: "flex", alignItems: "center", height: "100%" }}>
-            <Typography variant="body2" fontWeight={500}>
-              {value > 0 ? formatCurrency(value) : "-"}
-            </Typography>
-          </Box>
-        ),
-      },
-    ],
-    []
-  );
-
-  // Filas visibles en la tabla del control según el filtro de llegada. La
-  // selección para órdenes sigue basada en `items` completo (isOrderable), así
-  // que el filtro es solo de visualización.
-  // Los filtros de llegada del dashboard ya vienen traducidos a chips (ver
-  // statusFilter/conditionFilter/unmanagedOnly), asi que no hay un modo aparte:
-  // este cruce es el unico camino de filtrado y lo que se ve siempre coincide
-  // con los chips encendidos.
-  const visibleItems = React.useMemo(() => {
-    // Los tres criterios se cruzan con AND y ninguno corta antes que los otros:
-    // "Sin gestionar" es un criterio mas, no un modo aparte. Cuando cortaba
-    // (return propio) ignoraba la condicion elegida y mostraba items que el
-    // chip encendido decia estar excluyendo.
-    // Un grupo sin chips no filtra.
-    return items.filter(
-      (i) =>
-        (statusFilter.length === 0 || statusFilter.includes(i.stockStatusId)) &&
-        (conditionFilter.length === 0 || conditionFilter.includes(i.conditionId)) &&
-        (!unmanagedOnly ||
-          (i.stockStatusId === STOCK_STATUS.NEED_ORDER &&
-            i.conditionId !== CONDITION.NON_REPLENISHABLE &&
-            !i.orderedAt))
-    );
-  }, [items, statusFilter, conditionFilter, unmanagedOnly]);
-
-  // Condiciones presentes en ESTE control, con su conteo. Se poblan dinamicamente
-  // y no desde la tabla `conditions`: existen 4 condiciones pero ningun control
-  // usa mas de 2 (medido: 20 de 21 controles usan 2, uno usa 1), asi que las
-  // fijas dejarian siempre chips en cero que ademas vacian la tabla al tocarlos.
-  const conditionOptions = React.useMemo(() => {
-    const counts = new Map();
-    items.forEach((i) => {
-      if (!i.conditionId) return;
-      const prev = counts.get(i.conditionId);
-      counts.set(i.conditionId, {
-        id: i.conditionId,
-        name: i.conditionName || `Condición ${i.conditionId}`,
-        count: (prev?.count || 0) + 1,
-      });
-    });
-    // Orden por id: ESTANDAR, PRIORITARIO, MUY PRIORITARIO, NUEVA MARCA.
-    return [...counts.values()].sort((a, b) => a.id - b.id);
-  }, [items]);
-
-  // Red de seguridad del filtro de llegada: si se llego con
-  // ?filter=muyprioritario a un control que NO tiene ningun item de esa
-  // condicion, el chip no existe (se dibujan solo las condiciones presentes) y
-  // la tabla quedaria vacia sin nada que apagar. En ese caso se suelta la
-  // condicion y quedan los otros dos chips, que si estan a la vista.
-  React.useEffect(() => {
-    if (conditionOptions.length === 0) return; // items aun sin cargar
-    setConditionFilter((prev) => {
-      const next = prev.filter((id) => conditionOptions.some((o) => o.id === id));
-      return next.length === prev.length ? prev : next;
-    });
-  }, [conditionOptions]);
-
   // Pendientes de pedir ENTRE LOS VISIBLES. "Seleccionar todos" usa estos y no
   // los del control entero: con los chips se filtra mucho mas seguido, y
   // seleccionar items ocultos genera ordenes con cosas que no se ven en
@@ -774,22 +445,19 @@ export default function StockControlShow() {
     const needOrder = items.filter((i) => i.stockStatusId === STOCK_STATUS.NEED_ORDER).length;
     const optimal = items.filter((i) => i.stockStatusId === STOCK_STATUS.OPTIMAL).length;
     const excess = items.filter((i) => i.stockStatusId === STOCK_STATUS.OVERSTOCK).length;
-    // Faltantes reponibles todavía sin pedir (sin chip "Pedido a...").
-    // Excluye 'NUEVA MARCA' (no reponible), óptimos y sobrestock. Es la cifra
-    // accionable: cuántos faltantes quedan por gestionar en una orden.
-    const unmanaged = items.filter(
-      (i) =>
-        i.stockStatusId === STOCK_STATUS.NEED_ORDER &&
-        i.conditionId !== CONDITION.NON_REPLENISHABLE &&
-        !i.orderedAt
-    ).length;
+    // Faltantes reponibles todavía sin pedir (sin chip "Pedido a..."). Es la
+    // cifra accionable: cuántos faltantes quedan por gestionar en una orden.
+    const unmanaged = items.filter(isUnmanaged).length;
     const avg =
       total > 0 ? items.reduce((sum, i) => sum + (Number(i.compliance) || 0), 0) / total : 0;
     return { total, needOrder, optimal, excess, unmanaged, avg };
   }, [items]);
 
   const canAdd =
-    control?.status === "draft" && selectedProduct && stockRequire !== "" && Number(stockRequire) >= 0;
+    control?.status === "draft" &&
+    form.selectedProduct &&
+    form.stockRequire !== "" &&
+    Number(form.stockRequire) >= 0;
 
   return (
     <PageContainer
@@ -859,97 +527,13 @@ export default function StockControlShow() {
         </Stack>
       }
     >
-      {/* Stats bar */}
       {control && (
-        <Stack direction="row" spacing={2} sx={{ mb: 2 }} alignItems="center" flexWrap="wrap">
-          <Chip
-            label={control.statusName}
-            color={
-              control.status === "completed" ? "success"
-                : control.status === "discontinued" ? "default"
-                : "warning"
-            }
-            size="small"
-          />
-          {/* Total / En falta / Óptimo / Sobrestock son chips que filtran la
-              tabla. Multi-seleccion entre los de estado; "Total" limpia todo.
-              Compliance y Última sync quedan como texto: son medidas, no
-              categorias por las que se pueda recortar el listado.
-              Con el filtro del dashboard activo se deshabilitan, porque ese
-              recorte manda sobre los chips (ver visibleItems). */}
-          <Chip
-            label={`Total: ${stats.total}`}
-            size="small"
-            onClick={clearAllFilters}
-            color={noFiltersActive ? "primary" : "default"}
-            variant={noFiltersActive ? "filled" : "outlined"}
-          />
-          {STATUS_CHIPS.map(({ id, label, color, statKey }) => {
-            const isActive = statusFilter.includes(id);
-            return (
-              <Chip
-                key={id}
-                label={`${label}: ${stats[statKey]}`}
-                size="small"
-                onClick={() => toggleStatusFilter(id)}
-                color={isActive ? color : "default"}
-                variant={isActive ? "filled" : "outlined"}
-                sx={isActive ? undefined : { color: `${color}.main`, borderColor: `${color}.main` }}
-              />
-            );
-          })}
-          <Typography variant="body2">Compliance: <strong>{stats.avg.toFixed(1)}%</strong></Typography>
-          <Tooltip title="Faltantes reponibles todavía sin pedir (sin orden en gestión). Es la cifra accionable: lo que falta llevar a una orden.">
-            <Chip
-              label={`Sin gestionar: ${stats.unmanaged}`}
-              size="small"
-              onClick={() => {
-                setUnmanagedOnly((prev) => {
-                  // Al encenderlo se sueltan los estados que lo contradicen
-                  // (ya implica "En falta"); la condicion elegida se respeta.
-                  if (!prev) setStatusFilter((sf) => sf.filter((sid) => sid === 1));
-                  return !prev;
-                });
-                dropFilterParam();
-              }}
-              color={unmanagedOnly ? "warning" : "default"}
-              variant={unmanagedOnly ? "filled" : "outlined"}
-              sx={
-                unmanagedOnly
-                  ? undefined
-                  : { color: "warning.main", borderColor: "warning.main" }
-              }
-            />
-          </Tooltip>
-          {/* Chips de condicion. Se cruzan con los de estado (AND) y van en
-              gris para que se lean como otro grupo: los de estado usan los
-              colores semanticos (rojo/verde/amarillo) y repetirlos aca haria
-              parecer que son lo mismo. Solo aparecen si hay mas de una
-              condicion: con una sola el chip no discrimina nada. Excepcion: si
-              esa unica condicion esta ACTIVA (se llego con ?filter=muyprioritario
-              a un control donde todo es MUY PRIORITARIO), el chip se muestra
-              igual; si no, la tabla quedaria filtrada por un chip invisible y
-              sin forma de apagarlo. */}
-          {(conditionOptions.length > 1 || conditionFilter.length > 0) &&
-            conditionOptions.map(({ id, name, count }) => {
-              const isActive = conditionFilter.includes(id);
-              return (
-                <Chip
-                  key={`cond-${id}`}
-                  label={`${name}: ${count}`}
-                  size="small"
-                  onClick={() => toggleConditionFilter(id)}
-                  color={isActive ? "info" : "default"}
-                  variant={isActive ? "filled" : "outlined"}
-                />
-              );
-            })}
-          {formatDateTime(lastSyncAt) && (
-            <Typography variant="body2" color="text.secondary" sx={{ ml: "auto" }}>
-              Última sync: <strong>{formatDateTime(lastSyncAt)}</strong>
-            </Typography>
-          )}
-        </Stack>
+        <StockControlStatsBar
+          control={control}
+          stats={stats}
+          lastSyncAt={lastSyncAt}
+          filters={filters}
+        />
       )}
 
       {/* Tabs: control (tabla editable) vs discontinuos (sobrante) y promo (solo lectura) */}
@@ -967,185 +551,78 @@ export default function StockControlShow() {
       </Tabs>
 
       {activeTab === "discontinued" ? (
-        <Box sx={{ flex: 1, width: "100%" }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Productos con stock de este rubro que NO están en el control (sobrante /
-            stock a discontinuar). Solo visualización.
-          </Typography>
-          <DataGrid
-            rows={discontinued}
-            columns={discontinuedColumns}
-            disableRowSelectionOnClick
-            loading={isLoadingDisc}
-            autoHeight
-            pageSizeOptions={[25, 50, 100]}
-            initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
-            sx={dataGridSx}
-          />
-        </Box>
+        <ValuedProductsGrid
+          rows={discontinued}
+          loading={isLoadingDisc}
+          description="Productos con stock de este rubro que NO están en el control (sobrante / stock a discontinuar). Solo visualización."
+        />
       ) : activeTab === "promo" ? (
-        <Box sx={{ flex: 1, width: "100%" }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Productos PROMO con stock de este rubro. No se reponen ni cuentan como
-            discontinuos. Solo visualización.
-          </Typography>
-          <DataGrid
-            rows={promo}
-            columns={discontinuedColumns}
-            disableRowSelectionOnClick
-            loading={isLoadingPromo}
-            autoHeight
-            pageSizeOptions={[25, 50, 100]}
-            initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
-            sx={dataGridSx}
-          />
-        </Box>
+        <ValuedProductsGrid
+          rows={promo}
+          loading={isLoadingPromo}
+          description="Productos PROMO con stock de este rubro. No se reponen ni cuentan como discontinuos. Solo visualización."
+        />
       ) : (
         <>
-      {/* Inline add form — only visible in draft */}
-      {control?.status === "draft" && isAdmin && (
-        <Stack direction="row" spacing={1} sx={{ mb: 2 }} alignItems="center">
-          <Autocomplete
-            size="small"
-            options={availableProducts}
-            getOptionLabel={(o) => o.displayName || ""}
-            value={selectedProduct}
-            onChange={(_, val) => setSelectedProduct(val)}
-            isOptionEqualToValue={(o, v) => o.key === v.key}
-            // En edición el producto queda fijo (se edita condición/stock mínimo).
-            disabled={editingItemId !== null}
-            renderOption={(props, option) => (
-              <Box component="li" {...props} key={option.key}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
-                  <Typography variant="body2" sx={{ flex: 1 }}>
-                    {option.displayName}
-                  </Typography>
-                  {option.isGlobal && (
-                    <Chip label="sin stock" size="small" variant="outlined" color="default" />
-                  )}
-                </Box>
-              </Box>
-            )}
-            renderInput={(params) => (
-              <TextField {...params} label="Producto" placeholder="Buscar producto..." />
-            )}
-            sx={{ minWidth: 340 }}
-          />
-          <Autocomplete
-            size="small"
-            options={conditions}
-            getOptionLabel={(o) => o.condition_name || ""}
-            value={conditions.find((c) => c.id === selectedCondition) || null}
-            onChange={(_, val) => setSelectedCondition(val ? val.id : "")}
-            isOptionEqualToValue={(o, v) => o.id === v.id}
-            renderInput={(params) => (
-              <TextField {...params} label="Condición" />
-            )}
-            sx={{ minWidth: 160 }}
-          />
-          <TextField
-            size="small"
-            label="Stock mínimo"
-            type="number"
-            value={stockRequire}
-            onChange={(e) => setStockRequire(e.target.value)}
-            inputProps={{ min: 0 }}
-            sx={{ width: 140 }}
-          />
-          <Button
-            variant="contained"
-            onClick={handleUpsertItem}
-            disabled={!canAdd || isSaving}
-            startIcon={isSaving ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {isSaving
-              ? "Guardando..."
-              : editingItemId !== null
-                ? "Guardar cambios"
-                : "Agregar"}
-          </Button>
-          {editingItemId !== null && (
-            <Button variant="text" color="inherit" onClick={handleCancelEdit} disabled={isSaving}>
-              Cancelar
-            </Button>
+          {/* Inline add form — only visible in draft */}
+          {control?.status === "draft" && isAdmin && (
+            <StockItemForm
+              form={form}
+              availableProducts={availableProducts}
+              conditions={conditions}
+              canAdd={canAdd}
+            />
           )}
-        </Stack>
-      )}
 
-      {/* Barra de selección para órdenes parciales */}
-      {control && orderableIds.length > 0 && (
-        <Stack direction="row" spacing={1} sx={{ mb: 1 }} alignItems="center">
-          <Typography variant="body2" color="text.secondary">
-            {selectionModel.length > 0
-              ? `${selectionModel.length} ítem(s) seleccionado(s) para pedir`
-              : `${orderableIds.length} ítem(s) pendiente(s) de pedir`}
-          </Typography>
-          {/* Selecciona solo lo visible: con un filtro puesto, autoseleccionar
-              items ocultos arma ordenes con cosas que no estan en pantalla. El
-              texto dice cuantos son para que no haya sorpresa. */}
-          <Button
-            size="small"
-            onClick={handleSelectAllOrderable}
-            disabled={visibleOrderableIds.length === 0}
-          >
-            {noFiltersActive
-              ? "Seleccionar todos los pendientes"
-              : `Seleccionar los ${visibleOrderableIds.length} pendiente(s) visible(s)`}
-          </Button>
-          {hiddenSelectedCount > 0 && (
-            <Tooltip title="Entrarían en la orden aunque el filtro no los muestre">
-              <Chip
-                label={`${hiddenSelectedCount} seleccionado(s) fuera del filtro`}
-                size="small"
-                color="warning"
-                variant="outlined"
+          {/* Barra de selección para órdenes parciales */}
+          {control && orderableIds.length > 0 && (
+            <OrderSelectionBar
+              selectedCount={selectionModel.length}
+              orderableCount={orderableIds.length}
+              visibleOrderableCount={visibleOrderableIds.length}
+              hiddenSelectedCount={hiddenSelectedCount}
+              noFiltersActive={noFiltersActive}
+              onSelectAll={handleSelectAllOrderable}
+              onClear={() => setSelectionModel([])}
+            />
+          )}
+
+          {error ? (
+            <Alert severity="error">{error.message}</Alert>
+          ) : (
+            <Box sx={{ flex: 1, width: "100%" }}>
+              {/* Los filtros pueden dejar la tabla vacia con chips encendidos (ej.
+                  una condicion sin faltantes por gestionar). Sin aviso parece que
+                  el control no tiene items o que algo fallo. */}
+              {items.length > 0 && visibleItems.length === 0 && (
+                <Alert
+                  severity="info"
+                  sx={{ mb: 1 }}
+                  action={
+                    <Button color="inherit" size="small" onClick={clearAllFilters}>
+                      Limpiar filtros
+                    </Button>
+                  }
+                >
+                  Ningún ítem de los {items.length} del control coincide con los filtros elegidos.
+                </Alert>
+              )}
+              <DataGrid
+                rows={visibleItems}
+                columns={columns}
+                checkboxSelection
+                disableRowSelectionOnClick
+                isRowSelectable={({ row }) => isOrderable(row)}
+                rowSelectionModel={selectionModel}
+                onRowSelectionModelChange={(model) => setSelectionModel(model)}
+                loading={isLoading}
+                autoHeight
+                pageSizeOptions={[25, 50, 100]}
+                initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+                sx={dataGridSx}
               />
-            </Tooltip>
+            </Box>
           )}
-          {selectionModel.length > 0 && (
-            <Button size="small" color="inherit" onClick={() => setSelectionModel([])}>
-              Limpiar selección
-            </Button>
-          )}
-        </Stack>
-      )}
-
-      {error ? (
-        <Alert severity="error">{error.message}</Alert>
-      ) : (
-        <Box sx={{ flex: 1, width: "100%" }}>
-          {/* Los filtros pueden dejar la tabla vacia con chips encendidos (ej.
-              una condicion sin faltantes por gestionar). Sin aviso parece que
-              el control no tiene items o que algo fallo. */}
-          {items.length > 0 && visibleItems.length === 0 && (
-            <Alert
-              severity="info"
-              sx={{ mb: 1 }}
-              action={
-                <Button color="inherit" size="small" onClick={clearAllFilters}>
-                  Limpiar filtros
-                </Button>
-              }
-            >
-              Ningún ítem de los {items.length} del control coincide con los filtros elegidos.
-            </Alert>
-          )}
-          <DataGrid
-            rows={visibleItems}
-            columns={columns}
-            checkboxSelection
-            disableRowSelectionOnClick
-            isRowSelectable={({ row }) => isOrderable(row)}
-            rowSelectionModel={selectionModel}
-            onRowSelectionModelChange={(model) => setSelectionModel(model)}
-            loading={isLoading}
-            autoHeight
-            pageSizeOptions={[25, 50, 100]}
-            initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
-            sx={dataGridSx}
-          />
-        </Box>
-      )}
         </>
       )}
     </PageContainer>

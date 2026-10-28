@@ -17,7 +17,8 @@ import { dataGridClickableSx, dataGridLoadingSlotProps } from './dataGridStyles'
 import RefreshIcon from '@mui/icons-material/Refresh';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useNavigate } from 'react-router';
+import useQueryParams from '../hooks/useQueryParams';
 import { useDialogs } from '../hooks/useDialogs/useDialogs';
 import useNotifications from '../hooks/useNotifications/useNotifications';
 import { useAuth } from '../context/AuthContext';
@@ -38,7 +39,7 @@ export default function OrderList() {
   // vive en la URL, no en useState. Así el "Volver" de OrderShow puede restituir
   // la pantalla exacta con solo reponer la query string, y los enlaces del
   // dashboard (?tab=...&status=...) siguen siendo un caso más de lo mismo.
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, updateParams] = useQueryParams();
 
   const [orders, setOrders] = React.useState([]);
   const [branches, setBranches] = React.useState([]);
@@ -52,18 +53,8 @@ export default function OrderList() {
   // Escribe un filtro en la URL (o lo borra si queda vacío, para no arrastrar
   // parámetros muertos). replace: no ensucia el historial al tipear filtros.
   const setFilterParam = React.useCallback(
-    (key, value) => {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          if (value) next.set(key, String(value));
-          else next.delete(key);
-          return next;
-        },
-        { replace: true }
-      );
-    },
-    [setSearchParams]
+    (key, value) => updateParams({ [key]: value || null }, { replace: true }),
+    [updateParams]
   );
 
   const isEmployee = hasRole('employee');
@@ -80,14 +71,8 @@ export default function OrderList() {
   const activeTab = tabFromUrl === 'internal' || tabFromUrl === 'external' ? tabFromUrl : defaultTab;
 
   const handleTabChange = React.useCallback(
-    (_, val) => {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('tab', val);
-        return next;
-      });
-    },
-    [setSearchParams]
+    (_, val) => updateParams({ tab: val }),
+    [updateParams]
   );
 
   // Vista Activas (en gestión) vs Archivadas (finalizadas/canceladas). Vive en la
@@ -100,13 +85,9 @@ export default function OrderList() {
   const handleViewChange = React.useCallback(
     (_, val) => {
       if (!val || val === activeView) return; // ToggleButtonGroup: ignora deselección
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('view', val);
-        return next;
-      });
+      updateParams({ view: val });
     },
-    [setSearchParams, activeView]
+    [updateParams, activeView]
   );
 
   // Deja tab y view explícitos en la URL aunque el usuario no los haya tocado
@@ -114,16 +95,8 @@ export default function OrderList() {
   // pasa a la orden podría no llevarlos y el "Volver" caería en los defaults.
   React.useEffect(() => {
     if (tabFromUrl === activeTab && viewFromUrl === activeView) return;
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('tab', activeTab);
-        next.set('view', activeView);
-        return next;
-      },
-      { replace: true }
-    );
-  }, [tabFromUrl, viewFromUrl, activeTab, activeView, setSearchParams]);
+    updateParams({ tab: activeTab, view: activeView }, { replace: true });
+  }, [tabFromUrl, viewFromUrl, activeTab, activeView, updateParams]);
 
   const loadData = React.useCallback(async () => {
     setError(null);
