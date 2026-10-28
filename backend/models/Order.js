@@ -1,23 +1,18 @@
 const { pool } = require("../database/config");
 const Setting = require("./Setting");
-const { ORDER_STATUSES_TERMINAL, liveOrderSql } = require("../utils/orderStatus");
-
-// Condición 'NUEVA MARCA' (id 4): productos nuevos a prueba. Conviven en la hoja
-// de control con el resto pero NO son elegibles para reposición (no entran a
-// ninguna orden, aunque su estado de stock sea "Generar Pedido").
-const NON_REPLENISHABLE_CONDITION_ID = 4;
+const {
+  ORDER_STATUSES_TERMINAL,
+  liveOrderSql,
+  LIVE_RESERVATION_SQL,
+} = require("../utils/orderStatus");
+// CONDITION.NON_REPLENISHABLE ('NUEVA MARCA'): conviven en la hoja de control
+// pero NO entran a ninguna orden, aunque su estado sea "Generar Pedido".
+const { CONDITION, STOCK_STATUS } = require("../utils/domainConstants");
 
 // Estados terminales de una orden: una vez aquí, la orden está "archivada" y no
 // se mezcla con las de gestión. Fuente única: utils/orderStatus.js (espejado en
 // react-frontend/src/data/orders.js). El listado separa por este criterio.
 const ORDER_TERMINAL_STATUSES = ORDER_STATUSES_TERMINAL;
-
-// Cláusula SQL para "reserva viva" del Hub: unidades de órdenes internas que
-// TODAVÍA comprometen stock. Excluye ambos terminales, no solo 'cancelado':
-// al finalizar una orden la mercadería ya salió del Hub y el sync bajó el stock
-// real, así que seguir restándola aquí la descontaría DOS veces — y como
-// 'finalizado' es terminal, esa reserva no se liberaría nunca.
-const LIVE_RESERVATION_SQL = `oc.status NOT IN (${ORDER_TERMINAL_STATUSES.map((s) => `'${s}'`).join(", ")})`;
 
 // Devuelve la cláusula WHERE (sin la palabra WHERE) que filtra por grupo de
 // estado. statusGroup: 'active' (en gestión, no terminales) | 'archived'
@@ -163,11 +158,11 @@ class Order {
          ) prod_sup ON true
          WHERE sc.monthly_control_id = $1
            AND sc.id = ANY($2::int[])
-           AND sc.stock_status_id = 1
+           AND sc.stock_status_id = ${STOCK_STATUS.NEED_ORDER}
            AND sc.ordered_at IS NULL
            -- 'NUEVA MARCA' (productos a prueba) no es reponible: nunca entra a
            -- una orden aunque su estado sea "Generar Pedido".
-           AND (sc.condition_id IS NULL OR sc.condition_id <> ${NON_REPLENISHABLE_CONDITION_ID})`,
+           AND (sc.condition_id IS NULL OR sc.condition_id <> ${CONDITION.NON_REPLENISHABLE})`,
         [monthlyControlId, stockControlIds, isHubControl, targetPct]
       );
       const items = itemsResult.rows;

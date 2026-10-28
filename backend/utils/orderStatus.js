@@ -51,6 +51,14 @@ const ORDER_STATUSES_RECEIVING = ["pedido_realizado"];
 const liveOrderSql = (alias = "oc") =>
   `${alias}.status NOT IN (${ORDER_STATUSES_TERMINAL.map((s) => `'${s}'`).join(", ")})`;
 
+// "Reserva viva" del Nodo Hub: unidades de órdenes internas que TODAVÍA
+// comprometen stock. Excluye ambos terminales, no solo 'cancelado': al
+// finalizar una orden la mercadería ya salió del Hub y el sync bajó el stock
+// real, así que seguir restándola la descontaría DOS veces — y como
+// 'finalizado' es terminal, esa reserva no se liberaría nunca (fix 55ef5d7).
+// Es la misma cláusula que liveOrderSql() con el alias por defecto 'oc'.
+const LIVE_RESERVATION_SQL = liveOrderSql("oc");
+
 module.exports = {
   ORDER_STATUSES,
   ORDER_STATUSES_OPEN,
@@ -58,4 +66,5 @@ module.exports = {
   ORDER_STATUSES_EDITABLE,
   ORDER_STATUSES_RECEIVING,
   liveOrderSql,
+  LIVE_RESERVATION_SQL,
 };

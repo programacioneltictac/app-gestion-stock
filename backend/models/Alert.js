@@ -3,13 +3,8 @@ const BrandTrial = require("./BrandTrial");
 // Costo con fallback (avg_cost local -> cost_price -> promedio del grupo en
 // otras sucursales), compartido con el informe de situación y las órdenes.
 const { COST_EXPR } = require("../utils/costExpr");
-
-// Condición 'MUY PRIORITARIO' (conditions id 3): faltantes de máxima urgencia.
-const MUY_PRIORITARIO_CONDITION_ID = 3;
-// Condición 'NUEVA MARCA' (id 4): no reponible, se excluye de los faltantes.
-const NON_REPLENISHABLE_CONDITION_ID = 4;
-// stock_status 'Sobrestock' (id 3), fuente única StockControl.determineStockStatus (>120%).
-const OVERSTOCK_STATUS_ID = 3;
+// Ids de condiciones (MUY PRIORITARIO / NUEVA MARCA) y de estados de stock.
+const { CONDITION, STOCK_STATUS } = require("../utils/domainConstants");
 
 class Alert {
   /**
@@ -44,8 +39,8 @@ class Alert {
        LEFT JOIN categories c ON mc.category_id = c.id
        LEFT JOIN product_stock_by_branch psb ON psb.id = sc.product_stock_id
        LEFT JOIN products p ON psb.product_id = p.id
-       WHERE sc.stock_status_id = 1
-         AND sc.condition_id = ${MUY_PRIORITARIO_CONDITION_ID}
+       WHERE sc.stock_status_id = ${STOCK_STATUS.NEED_ORDER}
+         AND sc.condition_id = ${CONDITION.MUY_PRIORITARIO}
          AND sc.ordered_at IS NULL
          AND mc.status IN ('draft', 'completed')
          ${branchClause}
@@ -64,9 +59,9 @@ class Alert {
        FROM stock_controls sc
        JOIN monthly_controls mc ON sc.monthly_control_id = mc.id
        JOIN branches b ON mc.branch_id = b.id
-       WHERE sc.stock_status_id = 1
+       WHERE sc.stock_status_id = ${STOCK_STATUS.NEED_ORDER}
          AND sc.ordered_at IS NULL
-         AND sc.condition_id IS DISTINCT FROM ${NON_REPLENISHABLE_CONDITION_ID}
+         AND sc.condition_id IS DISTINCT FROM ${CONDITION.NON_REPLENISHABLE}
          AND mc.status IN ('draft', 'completed')
          ${branchClause}
        GROUP BY mc.branch_id, b.name, b.is_hub
@@ -95,7 +90,7 @@ class Alert {
        LEFT JOIN categories c ON mc.category_id = c.id
        LEFT JOIN product_stock_by_branch psb ON psb.id = sc.product_stock_id
        LEFT JOIN products p ON psb.product_id = p.id
-       WHERE sc.stock_status_id = ${OVERSTOCK_STATUS_ID}
+       WHERE sc.stock_status_id = ${STOCK_STATUS.OVERSTOCK}
          AND mc.status IN ('draft', 'completed')
          ${branchClause}
        GROUP BY mc.id, mc.branch_id, b.name, c.category_name

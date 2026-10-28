@@ -29,10 +29,9 @@ const {
   getAllBrands,
 } = require("./syncService");
 const { detectCategoryFromName } = require("./nameParser");
-
 // El P. Costo del export viene con IVA incluido; la app guarda costo neto.
 // Mismo criterio que extractApiFields en syncService.
-const VAT_RATE = 1.21;
+const { VAT_RATE } = require("./domainConstants");
 
 /**
  * Normaliza el nombre de sucursal del CSV para compararlo con branches.name.

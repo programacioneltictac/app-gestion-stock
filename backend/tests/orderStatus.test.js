@@ -13,3 +13,7 @@ test("liveOrderSql arma la clausula de orden viva", () => {
   assert.equal(status.liveOrderSql(), "oc.status NOT IN ('finalizado', 'cancelado')");
   assert.equal(status.liveOrderSql("o"), "o.status NOT IN ('finalizado', 'cancelado')");
 });
+
+test("LIVE_RESERVATION_SQL es la clausula de orden viva con alias oc", () => {
+  assert.equal(status.LIVE_RESERVATION_SQL, status.liveOrderSql("oc"));
+});

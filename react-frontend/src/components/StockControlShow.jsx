@@ -42,25 +42,17 @@ import {
 } from "../data/stock";
 import { createOrderFromControl } from "../data/orders";
 import PageContainer from "./PageContainer";
+import { CONDITION, STOCK_STATUS } from "../constants";
 import ActionButton from "./ActionButton";
 
 const STOCK_STATUS_COLOR = { 1: "error", 2: "success", 3: "warning", 4: "warning" };
 
-// Condición 'NUEVA MARCA' (id 4): productos a prueba, NO elegibles para
-// reposición (no se pueden seleccionar para generar orden). Espeja la regla
-// del backend en Order.createFromControl.
-const NON_REPLENISHABLE_CONDITION_ID = 4;
-// Condición 'MUY PRIORITARIO' (id 3): usada por el filtro de llegada desde la
-// tarjeta "Faltantes MUY PRIORITARIOS" del dashboard, para que el control
-// muestre exactamente los mismos ítems que contó esa tarjeta.
-const MUY_PRIORITARIO_CONDITION_ID = 3;
-
-// ¿Este ítem se puede pedir? Debe estar en "Generar Pedido" (1), no haber sido
-// ya pedido, y no ser 'NUEVA MARCA'.
+// ¿Este ítem se puede pedir? Debe estar en "Generar Pedido", no haber sido
+// ya pedido, y no ser 'NUEVA MARCA' (CONDITION.NON_REPLENISHABLE).
 const isOrderable = (item) =>
-  item.stockStatusId === 1 &&
+  item.stockStatusId === STOCK_STATUS.NEED_ORDER &&
   !item.orderedAt &&
-  item.conditionId !== NON_REPLENISHABLE_CONDITION_ID;
+  item.conditionId !== CONDITION.NON_REPLENISHABLE;
 
 // Etiqueta de la píldora "ya pedido" según el destino de la orden.
 // 'awaiting_sync': la mercadería ya se recibió (orden finalizada) pero el sync
@@ -171,7 +163,7 @@ export default function StockControlShow() {
   // Chips de condicion. Se cruzan con los de estado (AND): "En falta" +
   // "MUY PRIORITARIO" muestra los faltantes muy prioritarios.
   const [conditionFilter, setConditionFilter] = React.useState(() =>
-    filterFromUrl === "muyprioritario" ? [MUY_PRIORITARIO_CONDITION_ID] : []
+    filterFromUrl === "muyprioritario" ? [CONDITION.MUY_PRIORITARIO] : []
   );
 
   // Al tocar cualquier chip se limpia ?filter de la URL: si se llego desde el
@@ -633,8 +625,8 @@ export default function StockControlShow() {
             })()}
             {/* 'NUEVA MARCA' a prueba: aclarar por qué no se puede pedir cuando
                 está en "Generar Pedido" y aún no fue pedido. */}
-            {row.conditionId === NON_REPLENISHABLE_CONDITION_ID &&
-              row.stockStatusId === 1 &&
+            {row.conditionId === CONDITION.NON_REPLENISHABLE &&
+              row.stockStatusId === STOCK_STATUS.NEED_ORDER &&
               !row.orderedAt && (
                 <Tooltip title="Producto a prueba (NUEVA MARCA): no entra en órdenes de reposición">
                   <Chip label="No reponible" color="default" size="small" variant="outlined" />
@@ -732,8 +724,8 @@ export default function StockControlShow() {
         (statusFilter.length === 0 || statusFilter.includes(i.stockStatusId)) &&
         (conditionFilter.length === 0 || conditionFilter.includes(i.conditionId)) &&
         (!unmanagedOnly ||
-          (i.stockStatusId === 1 &&
-            i.conditionId !== NON_REPLENISHABLE_CONDITION_ID &&
+          (i.stockStatusId === STOCK_STATUS.NEED_ORDER &&
+            i.conditionId !== CONDITION.NON_REPLENISHABLE &&
             !i.orderedAt))
     );
   }, [items, statusFilter, conditionFilter, unmanagedOnly]);
@@ -794,16 +786,16 @@ export default function StockControlShow() {
 
   const stats = React.useMemo(() => {
     const total = items.length;
-    const needOrder = items.filter((i) => i.stockStatusId === 1).length;
-    const optimal = items.filter((i) => i.stockStatusId === 2).length;
-    const excess = items.filter((i) => i.stockStatusId === 3).length;
+    const needOrder = items.filter((i) => i.stockStatusId === STOCK_STATUS.NEED_ORDER).length;
+    const optimal = items.filter((i) => i.stockStatusId === STOCK_STATUS.OPTIMAL).length;
+    const excess = items.filter((i) => i.stockStatusId === STOCK_STATUS.OVERSTOCK).length;
     // Faltantes reponibles todavía sin pedir (sin chip "Pedido a...").
     // Excluye 'NUEVA MARCA' (no reponible), óptimos y sobrestock. Es la cifra
     // accionable: cuántos faltantes quedan por gestionar en una orden.
     const unmanaged = items.filter(
       (i) =>
-        i.stockStatusId === 1 &&
-        i.conditionId !== NON_REPLENISHABLE_CONDITION_ID &&
+        i.stockStatusId === STOCK_STATUS.NEED_ORDER &&
+        i.conditionId !== CONDITION.NON_REPLENISHABLE &&
         !i.orderedAt
     ).length;
     const avg =

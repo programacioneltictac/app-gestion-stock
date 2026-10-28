@@ -7,6 +7,7 @@ const {
   detectCategoryFromName,
 } = require("./nameParser");
 const StockControl = require("../models/StockControl");
+const { STOCK_STATUS, VAT_RATE } = require("./domainConstants");
 
 /**
  * Servicio de sincronización con la API externa.
@@ -164,7 +165,7 @@ function extractApiFields(apiProduct) {
     // Un stock no numérico daba NaN y la fila se descartaba en silencio.
     stock: Math.max(0, parseInt(unit.stock ?? 0, 10) || 0),
     costPrice: parseFloat(
-      (parseFloat(unit.preciocosto ?? 0) / 1.21).toFixed(2),
+      (parseFloat(unit.preciocosto ?? 0) / VAT_RATE).toFixed(2),
     ),
   };
 }
@@ -759,10 +760,10 @@ async function persistBranchStock(branch, rows, opts = {}) {
       `UPDATE stock_controls
        SET stock_current   = psb.stock,
            stock_status_id = CASE
-             WHEN stock_controls.stock_require = 0 THEN 2
-             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) < $2  THEN 1
-             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) <= $3 THEN 2
-             ELSE 3
+             WHEN stock_controls.stock_require = 0 THEN ${STOCK_STATUS.OPTIMAL}
+             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) < $2  THEN ${STOCK_STATUS.NEED_ORDER}
+             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) <= $3 THEN ${STOCK_STATUS.OPTIMAL}
+             ELSE ${STOCK_STATUS.OVERSTOCK}
            END,
            updated_at      = NOW()
        FROM product_stock_by_branch psb,
@@ -841,7 +842,7 @@ async function persistBranchStock(branch, rows, opts = {}) {
          AND mc.branch_id = $1
          AND mc.status IN ('draft', 'completed')
          AND sc.ordered_at IS NOT NULL
-         AND sc.stock_status_id IN (2, 3)
+         AND sc.stock_status_id IN (${STOCK_STATUS.OPTIMAL}, ${STOCK_STATUS.OVERSTOCK})
        RETURNING sc.id`,
       [branch.id],
     );

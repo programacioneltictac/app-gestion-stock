@@ -1,17 +1,10 @@
 const { pool } = require("../database/config");
-const { ORDER_STATUSES_TERMINAL } = require("../utils/orderStatus");
-
-// Cláusula SQL para "reserva viva" del Hub: unidades de órdenes internas que
-// TODAVÍA comprometen stock. Excluye ambos terminales (ver models/Order.js).
-const LIVE_RESERVATION_SQL = `oc.status NOT IN (${ORDER_STATUSES_TERMINAL.map((s) => `'${s}'`).join(", ")})`;
-
-// Fuente de verdad de los umbrales de compliance → stock_status.
-// 3 estados: < order% genera pedido, [order, overstock] óptimo, > overstock% sobrestock.
-const STOCK_STATUS = {
-  NEED_ORDER: 1, // "Generar Pedido"
-  OPTIMAL:    2, // "Stock Optimo"
-  OVERSTOCK:  3, // "Sobrestock"
-};
+// Reserva viva del Hub: excluye ambos terminales (ver utils/orderStatus.js).
+const { LIVE_RESERVATION_SQL } = require("../utils/orderStatus");
+// Fuente de verdad de los umbrales de compliance → stock_status (ids en
+// utils/domainConstants). 3 estados: < order% genera pedido, [order, overstock]
+// óptimo, > overstock% sobrestock.
+const { STOCK_STATUS } = require("../utils/domainConstants");
 
 // Defaults históricos de los umbrales. Si app_settings no tiene valores (o son
 // inválidos), se usan estos, conservando el comportamiento previo (70/120).

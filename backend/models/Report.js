@@ -3,24 +3,15 @@ const { COST_EXPR } = require("../utils/costExpr");
 const {
   ORDER_STATUSES,
   ORDER_STATUSES_TERMINAL,
+  liveOrderSql,
+  // Reserva viva del Hub: excluye AMBOS terminales (ver utils/orderStatus.js).
+  LIVE_RESERVATION_SQL,
 } = require("../utils/orderStatus");
-
-// Condición 'MUY PRIORITARIO' (conditions id 3): faltantes de máxima urgencia.
-const MUY_PRIORITARIO_CONDITION_ID = 3;
-// Condición 'NUEVA MARCA' (id 4): no reponible, se excluye de los faltantes.
-const NON_REPLENISHABLE_CONDITION_ID = 4;
+const { CONDITION, STOCK_STATUS } = require("../utils/domainConstants");
 
 // No hay umbral de "orden trabada": los plazos de entrega varían mucho según el
 // proveedor y ese criterio se maneja internamente. El informe lista las órdenes
 // externas abiertas con su antigüedad y deja la lectura a quien lo interpreta.
-
-// Reserva viva del Hub: unidades de órdenes internas que todavía comprometen
-// stock. Excluye AMBOS terminales, no solo 'cancelado' — mismo criterio que
-// Order.js (fix 55ef5d7): al finalizar una orden la mercadería ya salió y el
-// sync bajó el stock real, así que seguir restándola la descontaría dos veces.
-const LIVE_RESERVATION_SQL = `oc.status NOT IN (${ORDER_STATUSES_TERMINAL.map(
-  (s) => `'${s}'`
-).join(", ")})`;
 
 // Compliance de un ítem de control (require = 0 => 100). Misma fórmula que
 // MonthlyControl.getStats, para que el informe coincida con la pantalla.
@@ -74,9 +65,9 @@ class Report {
                 b.name    AS branch_name,
                 b.is_hub,
                 COUNT(sc.id)                                          AS total_items,
-                COUNT(*) FILTER (WHERE sc.stock_status_id = 1)        AS need_order_items,
-                COUNT(*) FILTER (WHERE sc.stock_status_id = 2)        AS optimal_items,
-                COUNT(*) FILTER (WHERE sc.stock_status_id = 3)        AS excess_items,
+                COUNT(*) FILTER (WHERE sc.stock_status_id = ${STOCK_STATUS.NEED_ORDER}) AS need_order_items,
+                COUNT(*) FILTER (WHERE sc.stock_status_id = ${STOCK_STATUS.OPTIMAL}) AS optimal_items,
+                COUNT(*) FILTER (WHERE sc.stock_status_id = ${STOCK_STATUS.OVERSTOCK}) AS excess_items,
                 ROUND(AVG(${COMPLIANCE_EXPR}))::int                   AS avg_compliance
          FROM monthly_controls mc
          JOIN branches b        ON mc.branch_id = b.id
@@ -101,8 +92,8 @@ class Report {
          JOIN branches b          ON mc.branch_id = b.id
          LEFT JOIN product_stock_by_branch psb ON psb.id = sc.product_stock_id
          LEFT JOIN products p                  ON psb.product_id = p.id
-         WHERE sc.stock_status_id = 1
-           AND sc.condition_id = ${MUY_PRIORITARIO_CONDITION_ID}
+         WHERE sc.stock_status_id = ${STOCK_STATUS.NEED_ORDER}
+           AND sc.condition_id = ${CONDITION.MUY_PRIORITARIO}
            AND sc.ordered_at IS NULL
            AND mc.status IN ('draft', 'completed')
            ${mcBranch}
@@ -241,7 +232,7 @@ class Report {
            COUNT(*) FILTER (WHERE oc.order_type = 'external') AS open_supplier,
            COUNT(*) FILTER (WHERE oc.order_type = 'internal') AS open_hub
          FROM orders_controls oc
-         WHERE oc.status NOT IN ('finalizado', 'cancelado') ${ocBranch}`,
+         WHERE ${liveOrderSql("oc")} ${ocBranch}`,
         params
       ),
 
@@ -260,9 +251,7 @@ class Report {
          LEFT JOIN suppliers sup ON oc.supplier_id = sup.id
          LEFT JOIN branches  b   ON oc.branch_id   = b.id
          WHERE oc.order_type = 'external'
-           AND oc.status NOT IN (${ORDER_STATUSES_TERMINAL.map(
-             (s) => `'${s}'`
-           ).join(", ")})
+           AND ${liveOrderSql("oc")}
            ${ocBranch}
          ORDER BY days_open DESC`,
         params
@@ -301,9 +290,9 @@ class Report {
          LEFT JOIN categories c   ON mc.category_id = c.id
          LEFT JOIN product_stock_by_branch psb ON psb.id = sc.product_stock_id
          LEFT JOIN products p                  ON psb.product_id = p.id
-         WHERE sc.stock_status_id = 1
+         WHERE sc.stock_status_id = ${STOCK_STATUS.NEED_ORDER}
            AND sc.ordered_at IS NULL
-           AND sc.condition_id IS DISTINCT FROM ${NON_REPLENISHABLE_CONDITION_ID}
+           AND sc.condition_id IS DISTINCT FROM ${CONDITION.NON_REPLENISHABLE}
            AND mc.status IN ('draft', 'completed')
            ${mcBranch}
          GROUP BY c.category_name

@@ -1,4 +1,6 @@
 const { pool } = require("../database/config");
+const { liveOrderSql } = require("../utils/orderStatus");
+const { STOCK_STATUS } = require("../utils/domainConstants");
 
 class MonthlyControl {
   // Control abierto por rubro (no atado al mes). category_id es obligatorio.
@@ -121,7 +123,7 @@ class MonthlyControl {
        JOIN order_details od ON od.order_control_id = oc.id
        JOIN stock_controls sc ON sc.id = od.stock_control_id
        WHERE sc.monthly_control_id = $1
-         AND oc.status NOT IN ('finalizado', 'cancelado')`,
+         AND ${liveOrderSql("oc")}`,
       [control_id]
     );
     return parseInt(result.rows[0].count, 10) || 0;
@@ -133,9 +135,9 @@ class MonthlyControl {
               c.category_name,
               u.username as created_by_username,
               COUNT(sc.id) as total_items,
-              COUNT(CASE WHEN sc.stock_status_id = 1 THEN 1 END) as need_order_items,
-              COUNT(CASE WHEN sc.stock_status_id = 2 THEN 1 END) as optimal_items,
-              COUNT(CASE WHEN sc.stock_status_id = 3 THEN 1 END) as excess_items,
+              COUNT(CASE WHEN sc.stock_status_id = ${STOCK_STATUS.NEED_ORDER} THEN 1 END) as need_order_items,
+              COUNT(CASE WHEN sc.stock_status_id = ${STOCK_STATUS.OPTIMAL} THEN 1 END) as optimal_items,
+              COUNT(CASE WHEN sc.stock_status_id = ${STOCK_STATUS.OVERSTOCK} THEN 1 END) as excess_items,
               0 as high_excess_items,
               ROUND(AVG(
                 CASE
@@ -189,9 +191,9 @@ class MonthlyControl {
     const result = await pool.query(
       `SELECT
          COUNT(*) as total_items,
-         COUNT(CASE WHEN sc.stock_status_id = 1 THEN 1 END) as need_order,
-         COUNT(CASE WHEN sc.stock_status_id = 2 THEN 1 END) as optimal,
-         COUNT(CASE WHEN sc.stock_status_id = 3 THEN 1 END) as excess,
+         COUNT(CASE WHEN sc.stock_status_id = ${STOCK_STATUS.NEED_ORDER} THEN 1 END) as need_order,
+         COUNT(CASE WHEN sc.stock_status_id = ${STOCK_STATUS.OPTIMAL} THEN 1 END) as optimal,
+         COUNT(CASE WHEN sc.stock_status_id = ${STOCK_STATUS.OVERSTOCK} THEN 1 END) as excess,
          0 as high_excess,
          ROUND(AVG(
            CASE
