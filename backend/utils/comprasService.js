@@ -1,5 +1,5 @@
-const axios = require("axios");
 const { pool } = require("../database/config");
+const { iduoGet, retryableError } = require("./iduoClient");
 const { detectBrandInName, escapeRegex } = require("./nameParser");
 
 /**
@@ -23,12 +23,8 @@ const API_URL =
   process.env.IDUO_COMPRAS_API_URL ||
   "http://igd.iduo.com.ar/indexinterno.php?PAG=Listadocompras";
 const API_TOKEN = process.env.IDUO_COMPRAS_API_KEY;
-const API_TIMEOUT_MS = Number(process.env.EXTERNAL_API_TIMEOUT_MS) || 480000;
-const API_RETRY_ATTEMPTS = Number(process.env.EXTERNAL_API_RETRIES) || 2;
-const API_RETRY_DELAY_MS = 2000;
+// Timeout y reintentos de la API: ver utils/iduoClient.js.
 const DEFAULT_MONTHS_BACK = Number(process.env.IDUO_COMPRAS_MONTHS_BACK) || 6;
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Trae las compras del rango [desde, hasta] (ambos Date). Devuelve el array de
@@ -51,30 +47,15 @@ async function fetchComprasFromApi(desde, hasta) {
   // La URL base ya incluye "?PAG=Listadocompras", por eso se concatena con &.
   const url = `${API_URL}${qs}`;
 
-  let lastError;
-  for (let attempt = 1; attempt <= API_RETRY_ATTEMPTS + 1; attempt++) {
-    try {
-      const response = await axios.get(url, {
-        // Mismo workaround que el sync de stock: pedir sin comprimir para evitar
-        // el "incorrect header check" intermitente de la API de IDUO.
-        headers: { Token: API_TOKEN, "Accept-Encoding": "identity" },
-        decompress: false,
-        timeout: API_TIMEOUT_MS,
-      });
-
-      const data = response.data;
-
-      if (data && data.hayerror) {
-        // Error determinístico de la API (parámetro inválido): no reintentar.
-        throw new Error(`Error de API de compras: ${data.error}`);
-      }
-
+  return iduoGet(url, {
+    token: API_TOKEN,
+    errorPrefix: "Error de API de compras",
+    label: "compras",
+    validate: (data) => {
       // La respuesta válida es un objeto con `productos`. Si no llega así (hipo
       // puntual, HTML de error, vacío), lo tratamos como transitorio y reintentamos.
       if (!data || !Array.isArray(data.productos)) {
-        const err = new Error("La API de compras no devolvió `productos`");
-        err.code = "NON_PRODUCTOS_RESPONSE";
-        throw err;
+        throw retryableError("La API de compras no devolvió `productos`", "NON_PRODUCTOS_RESPONSE");
       }
 
       // allEmpty: la API respondió 200 con las 4 listas vacías. IDUO no devuelve
@@ -87,27 +68,8 @@ async function fetchComprasFromApi(desde, hasta) {
         (!Array.isArray(data.sindetalles) || data.sindetalles.length === 0);
 
       return { productos: data.productos, allEmpty };
-    } catch (err) {
-      lastError = err;
-      const isTransient =
-        err.code === "ECONNABORTED" ||
-        err.code === "ECONNRESET" ||
-        err.code === "ETIMEDOUT" ||
-        err.code === "Z_DATA_ERROR" ||
-        err.code === "Z_BUF_ERROR" ||
-        err.code === "NON_PRODUCTOS_RESPONSE" ||
-        /incorrect header check/i.test(err.message || "") ||
-        (err.response && err.response.status >= 500);
-
-      if (!isTransient || attempt > API_RETRY_ATTEMPTS) throw err;
-
-      console.log(
-        `    Reintento ${attempt}/${API_RETRY_ATTEMPTS} (compras) tras error: ${err.message}`,
-      );
-      await sleep(API_RETRY_DELAY_MS);
-    }
-  }
-  throw lastError;
+    },
+  });
 }
 
 /**

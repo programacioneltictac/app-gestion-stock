@@ -5,6 +5,7 @@ const {
   detectGroup,
   detectBrandInName,
   detectCategoryFromName,
+  buildKeywordToCategory,
 } = require("../utils/nameParser");
 
 test("parseProductName quita el sufijo MM-AA RUBRO", () => {
@@ -131,4 +132,16 @@ test("detectBrandInName escapa metacaracteres de la marca", () => {
   assert.equal(detectBrandInName("X A.B Y", [{ id: 3, brand_name: "A+B" }]), null);
   assert.deepEqual(detectBrandInName("X A.B Y", [{ id: 4, brand_name: "A.B" }]), { brandId: 4, brandName: "A.B" });
   assert.equal(detectBrandInName("X AXB Y", [{ id: 4, brand_name: "A.B" }]), null);
+});
+
+test("buildKeywordToCategory ordena por longitud y descarta vacios", () => {
+  const map = buildKeywordToCategory([
+    { id: 1, name_keywords: ["LENTE DE SOL", "", null] },
+    { id: 2, name_keywords: ["LENTES DE SOL"] },
+    { id: 3, name_keywords: null },
+  ]);
+  assert.deepEqual(map, [
+    { keyword: "LENTES DE SOL", categoryId: 2 },
+    { keyword: "LENTE DE SOL", categoryId: 1 },
+  ]);
 });

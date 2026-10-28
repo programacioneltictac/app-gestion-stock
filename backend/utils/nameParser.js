@@ -138,6 +138,24 @@ function parseProductName(name, keywords = []) {
 }
 
 /**
+ * Arma la lista keywordToCat que espera detectCategoryFromName a partir de las
+ * filas de `categories` (id + name_keywords), ordenada por longitud
+ * descendente: "LENTES DE SOL" tiene que ganarle a "LENTE DE SOL".
+ * Compartido por el sync por API y el importador CSV.
+ * @param {Array<{id: number, name_keywords: string[]|null}>} categories
+ * @returns {Array<{keyword: string, categoryId: number}>}
+ */
+function buildKeywordToCategory(categories) {
+  return categories
+    .flatMap((c) =>
+      (c.name_keywords || [])
+        .filter(Boolean)
+        .map((kw) => ({ keyword: String(kw), categoryId: c.id })),
+    )
+    .sort((a, b) => b.keyword.length - a.keyword.length);
+}
+
+/**
  * Determina el rubro que declara el NOMBRE del producto (no el rubro por el que
  * la API lo devolvio). Es el blindaje contra productos que IDUO cuelga de un
  * rubro padre viejo: el sufijo del nombre lo escribe quien carga el producto y
@@ -253,4 +271,5 @@ module.exports = {
   detectGroup,
   detectBrandInName,
   detectCategoryFromName,
+  buildKeywordToCategory,
 };

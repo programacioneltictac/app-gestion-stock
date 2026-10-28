@@ -28,7 +28,7 @@ const {
   getGroupableBrands,
   getAllBrands,
 } = require("./syncService");
-const { detectCategoryFromName } = require("./nameParser");
+const { detectCategoryFromName, buildKeywordToCategory } = require("./nameParser");
 // El P. Costo del export viene con IVA incluido; la app guarda costo neto.
 // Mismo criterio que extractApiFields en syncService.
 const { VAT_RATE } = require("./domainConstants");
@@ -79,13 +79,7 @@ async function getKeywordToCategory() {
     "SELECT id, category_name, name_keywords FROM categories WHERE is_active = true",
   );
   const categoryById = new Map(result.rows.map((c) => [c.id, c]));
-  const keywordToCat = result.rows
-    .flatMap((c) =>
-      (c.name_keywords || [])
-        .filter(Boolean)
-        .map((kw) => ({ keyword: String(kw), categoryId: c.id })),
-    )
-    .sort((a, b) => b.keyword.length - a.keyword.length);
+  const keywordToCat = buildKeywordToCategory(result.rows);
   return { categoryById, keywordToCat };
 }
 

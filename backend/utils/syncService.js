@@ -1,13 +1,14 @@
-const axios = require("axios");
 const { pool } = require("../database/config");
 const {
   parseProductName,
   detectGroup,
   detectBrandInName,
   detectCategoryFromName,
+  buildKeywordToCategory,
 } = require("./nameParser");
 const StockControl = require("../models/StockControl");
 const { STOCK_STATUS, VAT_RATE } = require("./domainConstants");
+const { iduoGet, retryableError, envNumber } = require("./iduoClient");
 
 /**
  * Servicio de sincronización con la API externa.
@@ -21,19 +22,7 @@ const { STOCK_STATUS, VAT_RATE } = require("./domainConstants");
 
 const API_URL = "http://igd.iduo.com.ar/indexinterno.php";
 const API_TOKEN = process.env.EXTERNAL_API_KEY;
-// Valor numérico de una env var, o `fallback` si falta o no es un número.
-// Sin esto una env var ausente daba NaN: sin timeout, ningún intento de fetch,
-// o 0 sucursales sincronizadas reportadas como éxito. (Respeta un "0" explícito.)
-const envNumber = (name, fallback) => {
-  const raw = process.env[name];
-  const n = Number(raw);
-  return raw !== undefined && raw.trim() !== "" && Number.isFinite(n) ? n : fallback;
-};
-
-// Defaults iguales a los de comprasService.
-const API_TIMEOUT_MS = envNumber("EXTERNAL_API_TIMEOUT_MS", 480000);
-const API_RETRY_ATTEMPTS = envNumber("EXTERNAL_API_RETRIES", 2);
-const API_RETRY_DELAY_MS = 2000;
+// Timeout y reintentos de la API: ver utils/iduoClient.js.
 // Filtro de stock para la API: 'todos' trae catálogo completo;
 // 'stockmayoracero' trae solo productos con stock > 0 (más rápido).
 const STOCK_FILTER = process.env.SYNC_STOCK_FILTER || "stockmayoracero";
@@ -95,56 +84,18 @@ async function fetchProductsFromApi(
     qs += `&iddeposito[0]=${apiDepositCode}`;
   }
 
-  // Reintentar ante errores transitorios (timeout, ECONN*, 5xx).
-  // Errores de payload de la API (hayerror) NO se reintentan: son determinísticos.
-  let lastError;
-  for (let attempt = 1; attempt <= API_RETRY_ATTEMPTS + 1; attempt++) {
-    try {
-      const response = await axios.get(`${API_URL}?${qs}`, {
-        // Accept-Encoding: identity + decompress:false: pedimos la respuesta SIN
-        // comprimir. La API a veces declara gzip pero manda bytes inválidos,
-        // lo que rompe la descompresión con "incorrect header check" (Z_DATA_ERROR).
-        headers: { Token: API_TOKEN, "Accept-Encoding": "identity" },
-        decompress: false,
-        timeout: API_TIMEOUT_MS,
-      });
-
-      if (response.data && response.data.hayerror) {
-        throw new Error(`Error de API externa: ${response.data.error}`);
+  // Reintentos ante errores transitorios y `hayerror`: ver iduoGet.
+  return iduoGet(`${API_URL}?${qs}`, {
+    token: API_TOKEN,
+    validate: (data) => {
+      // Una respuesta no-array sin `hayerror` es un hipo puntual: se reintenta
+      // en vez de perder la categoría.
+      if (!Array.isArray(data)) {
+        throw retryableError("La API no devolvió un array de productos", "NON_ARRAY_RESPONSE");
       }
-
-      if (!Array.isArray(response.data)) {
-        // La API a veces, ante un hipo puntual, responde algo que no es un array
-        // ni trae `hayerror` (objeto vacío, "", HTML de error). Es intermitente
-        // (misma familia que "incorrect header check"), así que lo marcamos como
-        // transitorio para que se reintente en vez de perder la categoría.
-        const err = new Error("La API no devolvió un array de productos");
-        err.code = "NON_ARRAY_RESPONSE";
-        throw err;
-      }
-
-      return response.data;
-    } catch (err) {
-      lastError = err;
-      const isTransient =
-        err.code === "ECONNABORTED" || // timeout de axios
-        err.code === "ECONNRESET" ||
-        err.code === "ETIMEDOUT" ||
-        err.code === "Z_DATA_ERROR" || // descompresión: respuesta corrupta
-        err.code === "Z_BUF_ERROR" ||
-        err.code === "NON_ARRAY_RESPONSE" || // respuesta no-array sin hayerror
-        /incorrect header check/i.test(err.message || "") ||
-        (err.response && err.response.status >= 500);
-
-      if (!isTransient || attempt > API_RETRY_ATTEMPTS) throw err;
-
-      console.log(
-        `    Reintento ${attempt}/${API_RETRY_ATTEMPTS} tras error: ${err.message}`,
-      );
-      await sleep(API_RETRY_DELAY_MS);
-    }
-  }
-  throw lastError;
+      return data;
+    },
+  });
 }
 
 /**
@@ -236,13 +187,7 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null, cate
   // Mapa keyword → categoría destino, para detectCategoryFromName.
   // Sale de la query de categorías que ya se hizo arriba: no hace falta consulta nueva.
   // Ordenado por longitud descendente: "LENTES DE SOL" tiene que ganarle a "LENTE DE SOL".
-  const keywordToCat = categories
-    .flatMap((c) =>
-      (c.name_keywords || [])
-        .filter(Boolean)
-        .map((kw) => ({ keyword: String(kw), categoryId: c.id })),
-    )
-    .sort((a, b) => b.keyword.length - a.keyword.length);
+  const keywordToCat = buildKeywordToCategory(categories);
 
   // Recopilar productos de cada categoría junto con su category_id.
   // Se aplica REQUEST_DELAY_MS entre requests para no saturar al proveedor externo.
