@@ -336,6 +336,393 @@ async function syncBranch(branch, groupableBrands = null, allBrands = null, cate
 }
 
 /**
+ * Reset de stock de la sucursal antes de acumular (paso 1 de persistBranchStock).
+ * Total, o acotado a `resetCategoryIds` (guard anti-vaciado por rubro).
+ */
+async function resetBranchStock(client, branch, resetCategoryIds, syncTs) {
+  // Poner stock=0 y resetear acumuladores de costo antes de acumular.
+  // Se usa UPDATE en lugar de DELETE para preservar los IDs referenciados por stock_controls.
+  //
+  // GUARD ANTI-VACIADO POR RUBRO: con `resetCategoryIds` el reset se limita a
+  // los rubros que la fuente efectivamente trajo. Un CSV manual puede traer
+  // solo los rubros con stock, y por API un rubro puede fallar:
+  // sin este recorte, ese rubro quedaria en 0 en la sucursal y lo propagaria
+  // a los controles activos, commiteando "con exito".
+  if (resetCategoryIds && resetCategoryIds.length > 0) {
+    await client.query(
+      `UPDATE product_stock_by_branch psb
+       SET stock = 0, avg_cost = 0, cost_item_count = 0,
+           last_sync_at = COALESCE($3::timestamp, NOW())
+       WHERE psb.branch_id = $1
+         AND (
+           -- fila de producto suelto: su categoria decide
+           EXISTS (
+             SELECT 1 FROM products p
+             WHERE p.id = psb.product_id AND p.category_id = ANY($2::int[])
+           )
+           -- fila de grupo: el rubro del grupo decide
+           OR EXISTS (
+             SELECT 1 FROM product_groups g
+             JOIN categories c ON c.category_name = g.category_type
+             WHERE g.id = psb.group_id AND c.id = ANY($2::int[])
+           )
+         )`,
+      [branch.id, resetCategoryIds, syncTs],
+    );
+  } else {
+    await client.query(
+      `UPDATE product_stock_by_branch
+       SET stock = 0, avg_cost = 0, cost_item_count = 0,
+           last_sync_at = COALESCE($2::timestamp, NOW())
+       WHERE branch_id = $1`,
+      [branch.id, syncTs],
+    );
+  }
+}
+
+/**
+ * Upsert del grupo del producto (una vez por grupo y por corrida, vía
+ * `groupCache`). Devuelve el group_id.
+ */
+async function upsertGroupRow(client, groupInfo, currentCategoryName, groupCache, stats) {
+  const cacheKey = groupInfo.groupKey;
+  if (!groupCache[cacheKey]) {
+    // Upsert del grupo
+    const groupResult = await client.query(
+      `INSERT INTO product_groups (brand_id, brand_keyword, category_type, display_name, group_key)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (group_key) DO UPDATE
+         SET brand_id      = EXCLUDED.brand_id,
+             brand_keyword = EXCLUDED.brand_keyword,
+             display_name  = EXCLUDED.display_name,
+             updated_at    = NOW()
+       RETURNING id`,
+      [
+        groupInfo.brandId,
+        groupInfo.brandKeyword,
+        currentCategoryName,
+        groupInfo.displayName,
+        groupInfo.groupKey,
+      ],
+    );
+    groupCache[cacheKey] = groupResult.rows[0].id;
+    stats.grouped++;
+  }
+  return groupCache[cacheKey];
+}
+
+/**
+ * Upsert del producto (incluye cost_price). Devuelve el product id, o
+ * undefined si no se pudo resolver.
+ */
+async function upsertProductRow(client, row, stats) {
+  const {
+    productName, codigos, externalId, costPrice,
+    cleanName, groupId, groupInfo, currentCategoryId, brandId,
+  } = row;
+  // Dos identidades posibles segun la fuente:
+  //   API  -> external_id (idproducto de IDUO), la identidad canonica.
+  //   CSV  -> product_code, porque el export de IDUO NO trae idproducto.
+  // El CSV desambigua ademas por categoria: hay codigos repetidos entre
+  // rubros (mismo articulo cargado dos veces en IDUO, ej. MAX POLAR
+  // 281347 que existe como ARMAZON y como LENTE DE SOL).
+  const upsertValues = [
+    productName,
+    codigos,
+    externalId,
+    cleanName,
+    groupId,
+    groupInfo.isGrouped,
+    currentCategoryId,
+    brandId,
+    costPrice > 0 ? costPrice : null,
+  ];
+  const UPSERT_SET = `SET product_name  = EXCLUDED.product_name,
+           product_code  = EXCLUDED.product_code,
+           display_name  = EXCLUDED.display_name,
+           group_id      = EXCLUDED.group_id,
+           is_grouped    = EXCLUDED.is_grouped,
+           category_id   = EXCLUDED.category_id,
+           brand_id      = EXCLUDED.brand_id,
+           cost_price    = EXCLUDED.cost_price,
+           last_sync_at  = NOW(),
+           updated_at    = NOW()`;
+
+  let productId;
+  if (externalId) {
+    const productResult = await client.query(
+      `INSERT INTO products
+         (product_name, product_code, external_id, display_name,
+          group_id, is_grouped, category_id, brand_id, cost_price, last_sync_at, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), true)
+       ON CONFLICT (external_id) WHERE external_id IS NOT NULL DO UPDATE
+         ${UPSERT_SET}
+       RETURNING id`,
+      upsertValues,
+    );
+    productId = productResult.rows[0]?.id;
+  } else {
+    // Sin external_id: buscar por product_code + categoria. No se puede
+    // usar ON CONFLICT porque product_code NO tiene indice unico (y no
+    // debe tenerlo: el mismo codigo existe legitimamente en dos rubros).
+    //
+    // OJO: `products.product_code` puede guardar VARIOS codigos separados
+    // por coma ("109068, 737592" — hasta 4 en un mismo campo, 152 productos
+    // activos), porque asi los devuelve la API en `codigos`. El CSV, en
+    // cambio, trae UN solo codigo por fila. Comparar por igualdad exacta
+    // dejaba a esos productos sin matchear: se creaba un duplicado y el
+    // original quedaba en 0 (caso OPTIC 100 PASTA LEJOS, 434 unidades).
+    // Por eso se compara contra CADA codigo del campo.
+    //
+    // Ademas se comparan los codigos NUMERICOS sin ceros a la izquierda:
+    // la BD guarda "006619" y el CSV trae "6619" para el mismo producto
+    // (1091 productos activos tienen ceros adelante). La comparacion
+    // ltrim solo se aplica cuando AMBOS lados son numericos, para no
+    // tocar codigos alfanumericos como "AC2+0.50" u "ORT00430".
+    //
+    // Los espacios se sacan de AMBOS lados: si solo se sacan del campo,
+    // un codigo como "AO ONE DAY" nunca matchea y cada import crea una
+    // copia nueva (pasaron 7 copias de ACUVUE y OPTIMA).
+    const existing = await client.query(
+      `SELECT id FROM products
+       WHERE category_id = $2 AND is_active = true
+         AND EXISTS (
+           SELECT 1
+           FROM unnest(string_to_array(replace(product_code, ' ', ''), ',')) AS pc
+           WHERE pc = replace($1, ' ', '')
+              OR (pc ~ '^[0-9]+$' AND replace($1, ' ', '') ~ '^[0-9]+$'
+                  AND ltrim(pc, '0') = ltrim(replace($1, ' ', ''), '0'))
+         )
+       ORDER BY external_id NULLS LAST, id
+       LIMIT 1`,
+      [codigos, currentCategoryId],
+    );
+
+    if (existing.rows[0]) {
+      const updated = await client.query(
+        `UPDATE products
+         SET product_name = $1,
+             display_name = $2,
+             group_id     = $3,
+             is_grouped   = $4,
+             brand_id     = $5,
+             cost_price   = $6,
+             last_sync_at = NOW(),
+             updated_at   = NOW()
+         WHERE id = $7
+         RETURNING id`,
+        [
+          productName,
+          cleanName,
+          groupId,
+          groupInfo.isGrouped,
+          brandId,
+          costPrice > 0 ? costPrice : null,
+          existing.rows[0].id,
+        ],
+      );
+      productId = updated.rows[0]?.id;
+    } else {
+      // Producto nuevo: se crea con external_id NULL. Cuando IDUO libere
+      // la API, el sync lo va a encontrar por su idproducto real y lo
+      // insertara aparte; la limpieza de ese solapamiento es manual y
+      // esta documentada en el flujo de contingencia.
+      const inserted = await client.query(
+        `INSERT INTO products
+           (product_name, product_code, external_id, display_name,
+            group_id, is_grouped, category_id, brand_id, cost_price, last_sync_at, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), true)
+         RETURNING id`,
+        upsertValues,
+      );
+      productId = inserted.rows[0]?.id;
+      stats.created = (stats.created || 0) + 1;
+    }
+  }
+  return productId;
+}
+
+/**
+ * Upsert del stock por sucursal (incluye costos): acumulado si es grupo,
+ * directo si es producto suelto.
+ */
+async function upsertStockRow(client, branch, row, syncTs) {
+  const { productId, groupId, groupInfo, stock, cleanName, costPrice } = row;
+  if (groupInfo.isGrouped && groupId) {
+    // Para grupos: acumular stock y calcular promedio incremental de costo.
+    // Formula: nuevo_avg = (avg_actual * count + costo_nuevo) / (count + 1)
+    // Solo se incluye en el promedio si el producto tiene costo > 0.
+    await client.query(
+      `INSERT INTO product_stock_by_branch
+         (branch_id, group_id, stock, display_name, avg_cost, cost_item_count, last_sync_at)
+       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamp, NOW()))
+       ON CONFLICT (branch_id, group_id) DO UPDATE
+         SET stock            = product_stock_by_branch.stock + $3,
+             display_name     = EXCLUDED.display_name,
+             avg_cost         = CASE
+               WHEN $5 IS NOT NULL AND $5 > 0 THEN
+                 ROUND(
+                   (COALESCE(product_stock_by_branch.avg_cost, 0) * product_stock_by_branch.cost_item_count + $5)
+                   / (product_stock_by_branch.cost_item_count + 1)
+                 , 2)
+               ELSE product_stock_by_branch.avg_cost
+             END,
+             cost_item_count  = CASE
+               WHEN $5 IS NOT NULL AND $5 > 0
+               THEN product_stock_by_branch.cost_item_count + 1
+               ELSE product_stock_by_branch.cost_item_count
+             END,
+             last_sync_at     = COALESCE($7::timestamp, NOW())`,
+      [
+        branch.id,
+        groupId,
+        stock,
+        groupInfo.displayName,
+        costPrice > 0 ? costPrice : null,
+        costPrice > 0 ? 1 : 0,
+        syncTs,
+      ],
+    );
+  } else {
+    // Para productos individuales: stock y costo directo
+    await client.query(
+      `INSERT INTO product_stock_by_branch
+         (branch_id, product_id, stock, display_name, avg_cost, cost_item_count, last_sync_at)
+       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamp, NOW()))
+       ON CONFLICT (branch_id, product_id) DO UPDATE
+         SET stock           = $3,
+             display_name    = EXCLUDED.display_name,
+             avg_cost        = EXCLUDED.avg_cost,
+             cost_item_count = EXCLUDED.cost_item_count,
+             last_sync_at    = COALESCE($7::timestamp, NOW())`,
+      [
+        branch.id,
+        productId,
+        stock,
+        cleanName,
+        costPrice > 0 ? costPrice : null,
+        costPrice > 0 ? 1 : 0,
+        syncTs,
+      ],
+    );
+  }
+}
+
+/**
+ * Propaga el stock recién sincronizado a los ítems de los controles activos
+ * de la sucursal y recalcula su estado.
+ */
+async function refreshStockControls(client, branch) {
+  // Actualizar stock_current en controles ACTIVOS (draft + completed) de esta
+  // sucursal. Un control 'completed' sigue recibiendo stock real del sync (ya
+  // no se edita, pero sigue vivo); solo 'discontinued' queda congelado. Los
+  // umbrales de estado vienen de app_settings (con fallback 70/120) — misma
+  // fuente que StockControl.upsert.
+  const { orderPct, overstockPct } = await StockControl.getThresholds();
+  await client.query(
+    `UPDATE stock_controls
+     SET stock_current   = psb.stock,
+         stock_status_id = CASE
+           WHEN stock_controls.stock_require = 0 THEN ${STOCK_STATUS.OPTIMAL}
+           WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) < $2  THEN ${STOCK_STATUS.NEED_ORDER}
+           WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) <= $3 THEN ${STOCK_STATUS.OPTIMAL}
+           ELSE ${STOCK_STATUS.OVERSTOCK}
+         END,
+         updated_at      = NOW()
+     FROM product_stock_by_branch psb,
+          monthly_controls mc
+     WHERE stock_controls.product_stock_id = psb.id
+       AND stock_controls.monthly_control_id = mc.id
+       AND mc.branch_id = $1
+       AND mc.status IN ('draft', 'completed')`,
+    [branch.id, orderPct, overstockPct],
+  );
+}
+
+/**
+ * Libera los ítems pedidos de la sucursal cuyo pedido ya ingresó: por
+ * finalización y por stock real. Corre DESPUÉS de refreshStockControls.
+ */
+async function releaseOrderedItems(client, branch) {
+  // Liberar items YA FINALIZADOS: con el stock recien actualizado, un item
+  // cuyo pedido ya "ingreso" debe volver a estar disponible para reiniciar el
+  // ciclo (desaparece el chip "Pedido a...", vuelve a ser pedible). Se libera
+  // (ordered_at/order_detail_id = NULL) el stock_control de esta sucursal que:
+  //   - tiene al menos una linea en una orden VIVA (no cancelada), y
+  //   - TODAS sus lineas vivas estan finalizadas: completed_at IS NOT NULL
+  //     (finalizacion por item, Hub) O la orden esta en estado 'finalizado'
+  //     (proveedor, que no tiene finalizacion por item).
+  // Correr DESPUES del update de stock garantiza que el stock_current ya es el
+  // real: si el pedido efectivamente entro, el item quedara en optimo y no se
+  // repedira (sin ventana de doble pedido).
+  //
+  // OJO: aqui "viva" es 'no cancelada' e INCLUYE a 'finalizado' a proposito —
+  // NO usar liveOrderSql(), que excluye ambos terminales. Este bloque existe
+  // para detectar justamente las finalizadas y liberarlas; con liveOrderSql()
+  // el EXISTS daria falso siempre y no liberaria nada. Es una red de seguridad
+  // para ordenes finalizadas ANTES de este fix (Order.updateStatus ya libera
+  // al pasar a un terminal) y para la finalizacion por item del Hub.
+  await client.query(
+    `UPDATE stock_controls sc
+     SET ordered_at      = NULL,
+         order_detail_id = NULL,
+         updated_at      = NOW()
+     FROM monthly_controls mc
+     WHERE sc.monthly_control_id = mc.id
+       AND mc.branch_id = $1
+       AND mc.status IN ('draft', 'completed')
+       AND sc.ordered_at IS NOT NULL
+       -- al menos una linea en orden viva
+       AND EXISTS (
+         SELECT 1 FROM order_details od
+         JOIN orders_controls oc ON od.order_control_id = oc.id
+         WHERE od.stock_control_id = sc.id AND oc.status <> 'cancelado'
+       )
+       -- ninguna linea viva SIN finalizar (todas finalizadas)
+       AND NOT EXISTS (
+         SELECT 1 FROM order_details od
+         JOIN orders_controls oc ON od.order_control_id = oc.id
+         WHERE od.stock_control_id = sc.id
+           AND oc.status <> 'cancelado'
+           AND od.completed_at IS NULL
+           AND oc.status <> 'finalizado'
+       )`,
+    [branch.id],
+  );
+
+  // Liberar por STOCK REAL: complemento objetivo de la liberacion anterior.
+  // Un item pedido cuyo stock recien sincronizado quedo en optimo (2) o
+  // sobrestock (3) tiene el faltante cubierto por los numeros, aunque nadie
+  // lo haya finalizado (cubre el caso "la mercaderia entro pero nadie
+  // finalizo", donde el chip quedaba trabado indefinidamente). Solo se toca
+  // el control: las lineas de la orden NO se marcan (completed_at queda como
+  // este) para no pisar la marca humana de gestion; la orden se cierra a
+  // mano como siempre. Falso positivo aceptado: si el stock subio por otra
+  // causa (devolucion, ajuste en IDUO) se libera igual, pero al quedar en
+  // optimo/sobrestock no invita a repedir. Parciales (<70%, status 1) NO
+  // liberan.
+  const releasedByStock = await client.query(
+    `UPDATE stock_controls sc
+     SET ordered_at      = NULL,
+         order_detail_id = NULL,
+         updated_at      = NOW()
+     FROM monthly_controls mc
+     WHERE sc.monthly_control_id = mc.id
+       AND mc.branch_id = $1
+       AND mc.status IN ('draft', 'completed')
+       AND sc.ordered_at IS NOT NULL
+       AND sc.stock_status_id IN (${STOCK_STATUS.OPTIMAL}, ${STOCK_STATUS.OVERSTOCK})
+     RETURNING sc.id`,
+    [branch.id],
+  );
+  if (releasedByStock.rowCount > 0) {
+    console.log(
+      `Sucursal ${branch.name}: ${releasedByStock.rowCount} item(s) pedido(s) liberado(s) por stock cubierto (ids: ${releasedByStock.rows.map((r) => r.id).join(", ")})`,
+    );
+  }
+}
+
+/**
  * Escribe en la BD el stock de UNA sucursal a partir de filas YA NORMALIZADAS.
  *
  * Es el tramo comun a las dos fuentes de datos: la API de IDUO (syncBranch) y
@@ -384,44 +771,7 @@ async function persistBranchStock(branch, rows, opts = {}) {
   try {
     await client.query("BEGIN");
 
-    // Poner stock=0 y resetear acumuladores de costo antes de acumular.
-    // Se usa UPDATE en lugar de DELETE para preservar los IDs referenciados por stock_controls.
-    //
-    // GUARD ANTI-VACIADO POR RUBRO: con `resetCategoryIds` el reset se limita a
-    // los rubros que la fuente efectivamente trajo. Un CSV manual puede traer
-    // solo los rubros con stock, y por API un rubro puede fallar:
-    // sin este recorte, ese rubro quedaria en 0 en la sucursal y lo propagaria
-    // a los controles activos, commiteando "con exito".
-    if (resetCategoryIds && resetCategoryIds.length > 0) {
-      await client.query(
-        `UPDATE product_stock_by_branch psb
-         SET stock = 0, avg_cost = 0, cost_item_count = 0,
-             last_sync_at = COALESCE($3::timestamp, NOW())
-         WHERE psb.branch_id = $1
-           AND (
-             -- fila de producto suelto: su categoria decide
-             EXISTS (
-               SELECT 1 FROM products p
-               WHERE p.id = psb.product_id AND p.category_id = ANY($2::int[])
-             )
-             -- fila de grupo: el rubro del grupo decide
-             OR EXISTS (
-               SELECT 1 FROM product_groups g
-               JOIN categories c ON c.category_name = g.category_type
-               WHERE g.id = psb.group_id AND c.id = ANY($2::int[])
-             )
-           )`,
-        [branch.id, resetCategoryIds, syncTs],
-      );
-    } else {
-      await client.query(
-        `UPDATE product_stock_by_branch
-         SET stock = 0, avg_cost = 0, cost_item_count = 0,
-             last_sync_at = COALESCE($2::timestamp, NOW())
-         WHERE branch_id = $1`,
-        [branch.id, syncTs],
-      );
-    }
+    await resetBranchStock(client, branch, resetCategoryIds, syncTs);
 
     // Cache de grupos ya creados en esta sync para no re-consultar
     const groupCache = {};
@@ -467,154 +817,20 @@ async function persistBranchStock(branch, rows, opts = {}) {
         // --- Resolver group_id si corresponde ---
         let groupId = null;
         if (groupInfo.isGrouped) {
-          const cacheKey = groupInfo.groupKey;
-
-          if (!groupCache[cacheKey]) {
-            // Upsert del grupo
-            const groupResult = await client.query(
-              `INSERT INTO product_groups (brand_id, brand_keyword, category_type, display_name, group_key)
-               VALUES ($1, $2, $3, $4, $5)
-               ON CONFLICT (group_key) DO UPDATE
-                 SET brand_id      = EXCLUDED.brand_id,
-                     brand_keyword = EXCLUDED.brand_keyword,
-                     display_name  = EXCLUDED.display_name,
-                     updated_at    = NOW()
-               RETURNING id`,
-              [
-                groupInfo.brandId,
-                groupInfo.brandKeyword,
-                currentCategoryName,
-                groupInfo.displayName,
-                groupInfo.groupKey,
-              ],
-            );
-            groupCache[cacheKey] = groupResult.rows[0].id;
-            stats.grouped++;
-          }
-
-          groupId = groupCache[cacheKey];
+          groupId = await upsertGroupRow(
+            client, groupInfo, currentCategoryName, groupCache, stats,
+          );
         }
 
         // --- Upsert del producto (incluye cost_price) ---
-        // Dos identidades posibles segun la fuente:
-        //   API  -> external_id (idproducto de IDUO), la identidad canonica.
-        //   CSV  -> product_code, porque el export de IDUO NO trae idproducto.
-        // El CSV desambigua ademas por categoria: hay codigos repetidos entre
-        // rubros (mismo articulo cargado dos veces en IDUO, ej. MAX POLAR
-        // 281347 que existe como ARMAZON y como LENTE DE SOL).
-        const upsertValues = [
-          productName,
-          codigos,
-          externalId,
-          cleanName,
-          groupId,
-          groupInfo.isGrouped,
-          currentCategoryId,
-          brandId,
-          costPrice > 0 ? costPrice : null,
-        ];
-        const UPSERT_SET = `SET product_name  = EXCLUDED.product_name,
-                 product_code  = EXCLUDED.product_code,
-                 display_name  = EXCLUDED.display_name,
-                 group_id      = EXCLUDED.group_id,
-                 is_grouped    = EXCLUDED.is_grouped,
-                 category_id   = EXCLUDED.category_id,
-                 brand_id      = EXCLUDED.brand_id,
-                 cost_price    = EXCLUDED.cost_price,
-                 last_sync_at  = NOW(),
-                 updated_at    = NOW()`;
-
-        let productId;
-        if (externalId) {
-          const productResult = await client.query(
-            `INSERT INTO products
-               (product_name, product_code, external_id, display_name,
-                group_id, is_grouped, category_id, brand_id, cost_price, last_sync_at, is_active)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), true)
-             ON CONFLICT (external_id) WHERE external_id IS NOT NULL DO UPDATE
-               ${UPSERT_SET}
-             RETURNING id`,
-            upsertValues,
-          );
-          productId = productResult.rows[0]?.id;
-        } else {
-          // Sin external_id: buscar por product_code + categoria. No se puede
-          // usar ON CONFLICT porque product_code NO tiene indice unico (y no
-          // debe tenerlo: el mismo codigo existe legitimamente en dos rubros).
-          //
-          // OJO: `products.product_code` puede guardar VARIOS codigos separados
-          // por coma ("109068, 737592" — hasta 4 en un mismo campo, 152 productos
-          // activos), porque asi los devuelve la API en `codigos`. El CSV, en
-          // cambio, trae UN solo codigo por fila. Comparar por igualdad exacta
-          // dejaba a esos productos sin matchear: se creaba un duplicado y el
-          // original quedaba en 0 (caso OPTIC 100 PASTA LEJOS, 434 unidades).
-          // Por eso se compara contra CADA codigo del campo.
-          //
-          // Ademas se comparan los codigos NUMERICOS sin ceros a la izquierda:
-          // la BD guarda "006619" y el CSV trae "6619" para el mismo producto
-          // (1091 productos activos tienen ceros adelante). La comparacion
-          // ltrim solo se aplica cuando AMBOS lados son numericos, para no
-          // tocar codigos alfanumericos como "AC2+0.50" u "ORT00430".
-          //
-          // Los espacios se sacan de AMBOS lados: si solo se sacan del campo,
-          // un codigo como "AO ONE DAY" nunca matchea y cada import crea una
-          // copia nueva (pasaron 7 copias de ACUVUE y OPTIMA).
-          const existing = await client.query(
-            `SELECT id FROM products
-             WHERE category_id = $2 AND is_active = true
-               AND EXISTS (
-                 SELECT 1
-                 FROM unnest(string_to_array(replace(product_code, ' ', ''), ',')) AS pc
-                 WHERE pc = replace($1, ' ', '')
-                    OR (pc ~ '^[0-9]+$' AND replace($1, ' ', '') ~ '^[0-9]+$'
-                        AND ltrim(pc, '0') = ltrim(replace($1, ' ', ''), '0'))
-               )
-             ORDER BY external_id NULLS LAST, id
-             LIMIT 1`,
-            [codigos, currentCategoryId],
-          );
-
-          if (existing.rows[0]) {
-            const updated = await client.query(
-              `UPDATE products
-               SET product_name = $1,
-                   display_name = $2,
-                   group_id     = $3,
-                   is_grouped   = $4,
-                   brand_id     = $5,
-                   cost_price   = $6,
-                   last_sync_at = NOW(),
-                   updated_at   = NOW()
-               WHERE id = $7
-               RETURNING id`,
-              [
-                productName,
-                cleanName,
-                groupId,
-                groupInfo.isGrouped,
-                brandId,
-                costPrice > 0 ? costPrice : null,
-                existing.rows[0].id,
-              ],
-            );
-            productId = updated.rows[0]?.id;
-          } else {
-            // Producto nuevo: se crea con external_id NULL. Cuando IDUO libere
-            // la API, el sync lo va a encontrar por su idproducto real y lo
-            // insertara aparte; la limpieza de ese solapamiento es manual y
-            // esta documentada en el flujo de contingencia.
-            const inserted = await client.query(
-              `INSERT INTO products
-                 (product_name, product_code, external_id, display_name,
-                  group_id, is_grouped, category_id, brand_id, cost_price, last_sync_at, is_active)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), true)
-               RETURNING id`,
-              upsertValues,
-            );
-            productId = inserted.rows[0]?.id;
-            stats.created = (stats.created || 0) + 1;
-          }
-        }
+        const productId = await upsertProductRow(
+          client,
+          {
+            productName, codigos, externalId, costPrice,
+            cleanName, groupId, groupInfo, currentCategoryId, brandId,
+          },
+          stats,
+        );
 
         if (!productId) {
           await client.query("RELEASE SAVEPOINT sp_product");
@@ -622,64 +838,12 @@ async function persistBranchStock(branch, rows, opts = {}) {
         }
 
         // --- Upsert del stock por sucursal (incluye costos) ---
-        if (groupInfo.isGrouped && groupId) {
-          // Para grupos: acumular stock y calcular promedio incremental de costo.
-          // Formula: nuevo_avg = (avg_actual * count + costo_nuevo) / (count + 1)
-          // Solo se incluye en el promedio si el producto tiene costo > 0.
-          await client.query(
-            `INSERT INTO product_stock_by_branch
-               (branch_id, group_id, stock, display_name, avg_cost, cost_item_count, last_sync_at)
-             VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamp, NOW()))
-             ON CONFLICT (branch_id, group_id) DO UPDATE
-               SET stock            = product_stock_by_branch.stock + $3,
-                   display_name     = EXCLUDED.display_name,
-                   avg_cost         = CASE
-                     WHEN $5 IS NOT NULL AND $5 > 0 THEN
-                       ROUND(
-                         (COALESCE(product_stock_by_branch.avg_cost, 0) * product_stock_by_branch.cost_item_count + $5)
-                         / (product_stock_by_branch.cost_item_count + 1)
-                       , 2)
-                     ELSE product_stock_by_branch.avg_cost
-                   END,
-                   cost_item_count  = CASE
-                     WHEN $5 IS NOT NULL AND $5 > 0
-                     THEN product_stock_by_branch.cost_item_count + 1
-                     ELSE product_stock_by_branch.cost_item_count
-                   END,
-                   last_sync_at     = COALESCE($7::timestamp, NOW())`,
-            [
-              branch.id,
-              groupId,
-              stock,
-              groupInfo.displayName,
-              costPrice > 0 ? costPrice : null,
-              costPrice > 0 ? 1 : 0,
-              syncTs,
-            ],
-          );
-        } else {
-          // Para productos individuales: stock y costo directo
-          await client.query(
-            `INSERT INTO product_stock_by_branch
-               (branch_id, product_id, stock, display_name, avg_cost, cost_item_count, last_sync_at)
-             VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamp, NOW()))
-             ON CONFLICT (branch_id, product_id) DO UPDATE
-               SET stock           = $3,
-                   display_name    = EXCLUDED.display_name,
-                   avg_cost        = EXCLUDED.avg_cost,
-                   cost_item_count = EXCLUDED.cost_item_count,
-                   last_sync_at    = COALESCE($7::timestamp, NOW())`,
-            [
-              branch.id,
-              productId,
-              stock,
-              cleanName,
-              costPrice > 0 ? costPrice : null,
-              costPrice > 0 ? 1 : 0,
-              syncTs,
-            ],
-          );
-        }
+        await upsertStockRow(
+          client,
+          branch,
+          { productId, groupId, groupInfo, stock, cleanName, costPrice },
+          syncTs,
+        );
 
         await client.query("RELEASE SAVEPOINT sp_product");
         stats.synced++;
@@ -695,107 +859,8 @@ async function persistBranchStock(branch, rows, opts = {}) {
       }
     }
 
-    // Actualizar stock_current en controles ACTIVOS (draft + completed) de esta
-    // sucursal. Un control 'completed' sigue recibiendo stock real del sync (ya
-    // no se edita, pero sigue vivo); solo 'discontinued' queda congelado. Los
-    // umbrales de estado vienen de app_settings (con fallback 70/120) — misma
-    // fuente que StockControl.upsert.
-    const { orderPct, overstockPct } = await StockControl.getThresholds();
-    await client.query(
-      `UPDATE stock_controls
-       SET stock_current   = psb.stock,
-           stock_status_id = CASE
-             WHEN stock_controls.stock_require = 0 THEN ${STOCK_STATUS.OPTIMAL}
-             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) < $2  THEN ${STOCK_STATUS.NEED_ORDER}
-             WHEN ROUND((psb.stock::numeric / stock_controls.stock_require::numeric) * 100) <= $3 THEN ${STOCK_STATUS.OPTIMAL}
-             ELSE ${STOCK_STATUS.OVERSTOCK}
-           END,
-           updated_at      = NOW()
-       FROM product_stock_by_branch psb,
-            monthly_controls mc
-       WHERE stock_controls.product_stock_id = psb.id
-         AND stock_controls.monthly_control_id = mc.id
-         AND mc.branch_id = $1
-         AND mc.status IN ('draft', 'completed')`,
-      [branch.id, orderPct, overstockPct],
-    );
-
-    // Liberar items YA FINALIZADOS: con el stock recien actualizado, un item
-    // cuyo pedido ya "ingreso" debe volver a estar disponible para reiniciar el
-    // ciclo (desaparece el chip "Pedido a...", vuelve a ser pedible). Se libera
-    // (ordered_at/order_detail_id = NULL) el stock_control de esta sucursal que:
-    //   - tiene al menos una linea en una orden VIVA (no cancelada), y
-    //   - TODAS sus lineas vivas estan finalizadas: completed_at IS NOT NULL
-    //     (finalizacion por item, Hub) O la orden esta en estado 'finalizado'
-    //     (proveedor, que no tiene finalizacion por item).
-    // Correr DESPUES del update de stock garantiza que el stock_current ya es el
-    // real: si el pedido efectivamente entro, el item quedara en optimo y no se
-    // repedira (sin ventana de doble pedido).
-    //
-    // OJO: aqui "viva" es 'no cancelada' e INCLUYE a 'finalizado' a proposito —
-    // NO usar liveOrderSql(), que excluye ambos terminales. Este bloque existe
-    // para detectar justamente las finalizadas y liberarlas; con liveOrderSql()
-    // el EXISTS daria falso siempre y no liberaria nada. Es una red de seguridad
-    // para ordenes finalizadas ANTES de este fix (Order.updateStatus ya libera
-    // al pasar a un terminal) y para la finalizacion por item del Hub.
-    await client.query(
-      `UPDATE stock_controls sc
-       SET ordered_at      = NULL,
-           order_detail_id = NULL,
-           updated_at      = NOW()
-       FROM monthly_controls mc
-       WHERE sc.monthly_control_id = mc.id
-         AND mc.branch_id = $1
-         AND mc.status IN ('draft', 'completed')
-         AND sc.ordered_at IS NOT NULL
-         -- al menos una linea en orden viva
-         AND EXISTS (
-           SELECT 1 FROM order_details od
-           JOIN orders_controls oc ON od.order_control_id = oc.id
-           WHERE od.stock_control_id = sc.id AND oc.status <> 'cancelado'
-         )
-         -- ninguna linea viva SIN finalizar (todas finalizadas)
-         AND NOT EXISTS (
-           SELECT 1 FROM order_details od
-           JOIN orders_controls oc ON od.order_control_id = oc.id
-           WHERE od.stock_control_id = sc.id
-             AND oc.status <> 'cancelado'
-             AND od.completed_at IS NULL
-             AND oc.status <> 'finalizado'
-         )`,
-      [branch.id],
-    );
-
-    // Liberar por STOCK REAL: complemento objetivo de la liberacion anterior.
-    // Un item pedido cuyo stock recien sincronizado quedo en optimo (2) o
-    // sobrestock (3) tiene el faltante cubierto por los numeros, aunque nadie
-    // lo haya finalizado (cubre el caso "la mercaderia entro pero nadie
-    // finalizo", donde el chip quedaba trabado indefinidamente). Solo se toca
-    // el control: las lineas de la orden NO se marcan (completed_at queda como
-    // este) para no pisar la marca humana de gestion; la orden se cierra a
-    // mano como siempre. Falso positivo aceptado: si el stock subio por otra
-    // causa (devolucion, ajuste en IDUO) se libera igual, pero al quedar en
-    // optimo/sobrestock no invita a repedir. Parciales (<70%, status 1) NO
-    // liberan.
-    const releasedByStock = await client.query(
-      `UPDATE stock_controls sc
-       SET ordered_at      = NULL,
-           order_detail_id = NULL,
-           updated_at      = NOW()
-       FROM monthly_controls mc
-       WHERE sc.monthly_control_id = mc.id
-         AND mc.branch_id = $1
-         AND mc.status IN ('draft', 'completed')
-         AND sc.ordered_at IS NOT NULL
-         AND sc.stock_status_id IN (${STOCK_STATUS.OPTIMAL}, ${STOCK_STATUS.OVERSTOCK})
-       RETURNING sc.id`,
-      [branch.id],
-    );
-    if (releasedByStock.rowCount > 0) {
-      console.log(
-        `Sucursal ${branch.name}: ${releasedByStock.rowCount} item(s) pedido(s) liberado(s) por stock cubierto (ids: ${releasedByStock.rows.map((r) => r.id).join(", ")})`,
-      );
-    }
+    await refreshStockControls(client, branch);
+    await releaseOrderedItems(client, branch);
 
     await client.query("COMMIT");
   } catch (err) {
