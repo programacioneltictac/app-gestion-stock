@@ -401,6 +401,84 @@ class StockControl {
     );
     return result.rows;
   }
+
+  /**
+   * Productos ya sincronizados en la sucursal, FILTRADOS por el rubro del
+   * control (selector "Agregar producto"). product_stock_by_branch no tiene
+   * category_id, así que el rubro se resuelve:
+   *   - productos sueltos: psb.product_id → products.category_id
+   *   - grupos:            psb.group_id   → product_groups.category_type (= categories.category_name)
+   * @param {number} branchId    sucursal del control
+   * @param {number} categoryId  rubro del control
+   */
+  static async findAvailableProducts(branchId, categoryId) {
+    const result = await pool.query(
+      `SELECT psb.id, psb.display_name, psb.stock, psb.last_sync_at
+         FROM product_stock_by_branch psb
+         LEFT JOIN products p       ON psb.product_id = p.id
+         LEFT JOIN product_groups pg ON psb.group_id = pg.id
+         LEFT JOIN categories cg    ON pg.category_type = cg.category_name
+        WHERE psb.branch_id = $1
+          AND psb.display_name IS NOT NULL
+          AND ( p.category_id = $2 OR cg.id = $2 )
+          -- Excluir marcas con prueba EN PRUEBA en esta sucursal/rubro: se
+          -- gestionan en "Marcas a prueba", no se suman al control todavia.
+          AND NOT EXISTS (
+            SELECT 1 FROM brand_trials bt
+            WHERE bt.status = 'en_prueba'
+              AND bt.branch_id = psb.branch_id
+              AND bt.brand_id = COALESCE(pg.brand_id, p.brand_id)
+              AND (bt.category_id IS NULL OR bt.category_id = $2)
+          )
+        ORDER BY psb.display_name`,
+      [branchId, categoryId]
+    );
+    return result.rows;
+  }
+
+  /**
+   * Productos/grupos del sistema que AÚN NO existen en esta sucursal (stock 0
+   * no sincronizado), del rubro del control. Al elegirlos se crea su fila
+   * product_stock_by_branch en 0 (ver resolveProductStockId).
+   * @param {number} branchId    sucursal del control
+   * @param {number} categoryId  rubro del control
+   */
+  static async findGlobalCatalog(branchId, categoryId) {
+    // Productos individuales activos sin fila en esta sucursal (los no agrupados;
+    // los agrupados se ofrecen como grupo). category_name desde categories.
+    // Grupos sin fila en esta sucursal; category_name desde product_groups.category_type.
+    // Todo FILTRADO por el rubro del control:
+    //   - productos sueltos: products.category_id = $2
+    //   - grupos:            product_groups.category_type = categories.category_name (id = $2)
+    const result = await pool.query(
+      `SELECT p.id AS product_id, NULL::int AS group_id,
+              p.display_name, c.category_name
+         FROM products p
+         JOIN categories c ON p.category_id = c.id
+        WHERE p.is_active = true
+          AND p.is_grouped = false
+          AND p.display_name IS NOT NULL
+          AND c.id = $2
+          AND NOT EXISTS (
+            SELECT 1 FROM product_stock_by_branch psb
+             WHERE psb.product_id = p.id AND psb.branch_id = $1
+          )
+       UNION ALL
+       SELECT NULL::int AS product_id, pg.id AS group_id,
+              pg.display_name, pg.category_type AS category_name
+         FROM product_groups pg
+         JOIN categories cg ON pg.category_type = cg.category_name
+        WHERE pg.display_name IS NOT NULL
+          AND cg.id = $2
+          AND NOT EXISTS (
+            SELECT 1 FROM product_stock_by_branch psb
+             WHERE psb.group_id = pg.id AND psb.branch_id = $1
+          )
+       ORDER BY display_name`,
+      [branchId, categoryId]
+    );
+    return result.rows;
+  }
 }
 
 module.exports = StockControl;

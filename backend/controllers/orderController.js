@@ -14,6 +14,12 @@ const {
 // control de acceso por sucursal del empleado.
 const canManageExternalOrders = (user) => user.role !== "employee";
 
+// Acceso a una orden: externa -> canManageExternalOrders; interna -> sucursal.
+const canAccessOrder = (user, order) =>
+  order.order_type === "external"
+    ? canManageExternalOrders(user)
+    : canAccessBranch(user, order.branch_id);
+
 // POST /api/orders/from-control
 // Genera una orden de reposicion con los items seleccionados de un control.
 // El control puede estar draft o completed; los items elegidos quedan marcados
@@ -111,13 +117,7 @@ const getOrderDetail = async (req, res) => {
     if (!order) {
       return res.status(404).json({ status: "error", message: "Orden no encontrada" });
     }
-    // Las externas (proveedor) son multi-sucursal: solo admin/manager. Las
-    // internas se validan por sucursal del empleado.
-    if (order.order_type === "external") {
-      if (!canManageExternalOrders(req.user)) {
-        return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
-      }
-    } else if (!canAccessBranch(req.user, order.branch_id)) {
+    if (!canAccessOrder(req.user, order)) {
       return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
     }
 
@@ -146,11 +146,7 @@ const updateStatus = async (req, res) => {
     if (!order) {
       return res.status(404).json({ status: "error", message: "Orden no encontrada" });
     }
-    if (order.order_type === "external") {
-      if (!canManageExternalOrders(req.user)) {
-        return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
-      }
-    } else if (!canAccessBranch(req.user, order.branch_id)) {
+    if (!canAccessOrder(req.user, order)) {
       return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
     }
     if (ORDER_STATUSES_TERMINAL.includes(order.status)) {
@@ -184,11 +180,7 @@ const updateItemReceived = async (req, res) => {
     if (!order) {
       return res.status(404).json({ status: "error", message: "Item de orden no encontrado" });
     }
-    if (order.order_type === "external") {
-      if (!canManageExternalOrders(req.user)) {
-        return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
-      }
-    } else if (!canAccessBranch(req.user, order.branch_id)) {
+    if (!canAccessOrder(req.user, order)) {
       return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
     }
     if (!ORDER_STATUSES_RECEIVING.includes(order.status)) {
@@ -219,11 +211,7 @@ const receiveAll = async (req, res) => {
     if (!order) {
       return res.status(404).json({ status: "error", message: "Orden no encontrada" });
     }
-    if (order.order_type === "external") {
-      if (!canManageExternalOrders(req.user)) {
-        return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
-      }
-    } else if (!canAccessBranch(req.user, order.branch_id)) {
+    if (!canAccessOrder(req.user, order)) {
       return res.status(403).json({ status: "error", message: "No tienes acceso a esta orden" });
     }
     if (!ORDER_STATUSES_RECEIVING.includes(order.status)) {

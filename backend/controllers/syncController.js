@@ -1,5 +1,5 @@
 const { syncAllBranches, syncBranch } = require("../utils/syncService");
-const { pool } = require("../database/config");
+const Branch = require("../models/Branch");
 const { handleControllerError } = require("../utils/errorHelper");
 const { runExclusive, respondBusy } = require("../utils/syncLock");
 
@@ -22,12 +22,7 @@ const syncOneBranch = async (req, res) => {
   try {
     const { branch_id } = req.params;
 
-    const branchResult = await pool.query(
-      "SELECT id, name, api_branch_code, api_deposit_code FROM branches WHERE id = $1 AND is_active = true",
-      [branch_id]
-    );
-
-    const branch = branchResult.rows[0];
+    const branch = await Branch.findActiveForSync(branch_id);
 
     if (!branch) {
       return res.status(404).json({ status: "error", message: "Sucursal no encontrada" });
@@ -59,22 +54,9 @@ const syncOneBranch = async (req, res) => {
 // GET /api/sync/status  — muestra cuándo fue la última sync por sucursal
 const getSyncStatus = async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT
-         b.id,
-         b.name,
-         b.api_branch_code,
-         b.api_deposit_code,
-         MAX(psb.last_sync_at) AS last_sync_at,
-         COUNT(psb.id)         AS items_synced
-       FROM branches b
-       LEFT JOIN product_stock_by_branch psb ON psb.branch_id = b.id
-       WHERE b.is_active = true
-       GROUP BY b.id, b.name, b.api_branch_code, b.api_deposit_code
-       ORDER BY b.name`
-    );
+    const branches = await Branch.getSyncStatus();
 
-    res.json({ status: "success", branches: result.rows });
+    res.json({ status: "success", branches });
   } catch (error) {
     handleControllerError(res, error, "Error obteniendo estado de sync:");
   }

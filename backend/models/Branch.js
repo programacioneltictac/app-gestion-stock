@@ -120,6 +120,35 @@ class Branch {
     );
     return result.rows;
   }
+
+  // Sucursal ACTIVA con los datos que necesita syncBranch (sync manual de una
+  // sola sucursal). null si no existe o está inactiva.
+  static async findActiveForSync(id) {
+    const result = await pool.query(
+      "SELECT id, name, api_branch_code, api_deposit_code FROM branches WHERE id = $1 AND is_active = true",
+      [id]
+    );
+    return result.rows[0] || null;
+  }
+
+  // Última sync y cantidad de ítems sincronizados por sucursal activa.
+  static async getSyncStatus() {
+    const result = await pool.query(
+      `SELECT
+         b.id,
+         b.name,
+         b.api_branch_code,
+         b.api_deposit_code,
+         MAX(psb.last_sync_at) AS last_sync_at,
+         COUNT(psb.id)         AS items_synced
+       FROM branches b
+       LEFT JOIN product_stock_by_branch psb ON psb.branch_id = b.id
+       WHERE b.is_active = true
+       GROUP BY b.id, b.name, b.api_branch_code, b.api_deposit_code
+       ORDER BY b.name`
+    );
+    return result.rows;
+  }
 }
 
 module.exports = Branch;

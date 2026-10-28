@@ -5,7 +5,22 @@ const Category = require("../models/Category");
 const { canAccessBranch, getBranchId } = require("../middlewares/auth");
 const { handleControllerError } = require("../utils/errorHelper");
 const { parsePositiveInt } = require("../utils/pagination");
-const { pool } = require("../database/config");
+
+// Busca el control y valida que el usuario tenga acceso a su sucursal. Si no
+// existe (404) o no hay acceso (403) ya respondió y devuelve null: el handler
+// solo tiene que cortar con `if (!control) return;`.
+const loadAccessibleControl = async (req, res, controlId) => {
+  const control = await MonthlyControl.findById(controlId);
+  if (!control) {
+    res.status(404).json({ status: "error", message: "Control no encontrado" });
+    return null;
+  }
+  if (!canAccessBranch(req.user, control.branch_id)) {
+    res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
+    return null;
+  }
+  return control;
+};
 
 const getCurrentPeriod = () => {
   const now = new Date();
@@ -82,11 +97,8 @@ const getCurrentMonthlyControl = async (req, res) => {
 const getMonthlyControlById = async (req, res) => {
   try {
     const { control_id } = req.params;
-    const control = await MonthlyControl.findById(control_id);
-    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
-    if (!canAccessBranch(req.user, control.branch_id)) {
-      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
-    }
+    const control = await loadAccessibleControl(req, res, control_id);
+    if (!control) return;
 
     const stats = await MonthlyControl.getStats(control.id);
     res.json({ status: "success", control, stats, canEdit: control.status === "draft" });
@@ -102,11 +114,8 @@ const getMonthlyControlById = async (req, res) => {
 const getDiscontinued = async (req, res) => {
   try {
     const { control_id } = req.params;
-    const control = await MonthlyControl.findById(control_id);
-    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
-    if (!canAccessBranch(req.user, control.branch_id)) {
-      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
-    }
+    const control = await loadAccessibleControl(req, res, control_id);
+    if (!control) return;
 
     const products = await StockControl.findDiscontinued(
       control.branch_id,
@@ -125,11 +134,8 @@ const getDiscontinued = async (req, res) => {
 const getPromo = async (req, res) => {
   try {
     const { control_id } = req.params;
-    const control = await MonthlyControl.findById(control_id);
-    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
-    if (!canAccessBranch(req.user, control.branch_id)) {
-      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
-    }
+    const control = await loadAccessibleControl(req, res, control_id);
+    if (!control) return;
 
     const products = await StockControl.findPromo(control.branch_id, control.category_id);
     res.json({ status: "success", products });
@@ -146,11 +152,8 @@ const completeMonthlyControl = async (req, res) => {
       return res.status(400).json({ status: "error", message: "control_id es requerido" });
     }
 
-    const control = await MonthlyControl.findById(control_id);
-    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
-    if (!canAccessBranch(req.user, control.branch_id)) {
-      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
-    }
+    const control = await loadAccessibleControl(req, res, control_id);
+    if (!control) return;
     if (control.status !== "draft") {
       return res.status(400).json({ status: "error", message: "Solo se pueden completar controles en borrador" });
     }
@@ -179,11 +182,8 @@ const discontinueMonthlyControl = async (req, res) => {
       return res.status(400).json({ status: "error", message: "control_id es requerido" });
     }
 
-    const control = await MonthlyControl.findById(control_id);
-    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
-    if (!canAccessBranch(req.user, control.branch_id)) {
-      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
-    }
+    const control = await loadAccessibleControl(req, res, control_id);
+    if (!control) return;
     if (control.status !== "completed") {
       return res.status(400).json({ status: "error", message: "Solo se pueden discontinuar controles completados" });
     }
@@ -216,11 +216,8 @@ const reopenMonthlyControl = async (req, res) => {
       return res.status(403).json({ status: "error", message: "Solo los administradores pueden reabrir controles" });
     }
 
-    const control = await MonthlyControl.findById(control_id);
-    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
-    if (!canAccessBranch(req.user, control.branch_id)) {
-      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
-    }
+    const control = await loadAccessibleControl(req, res, control_id);
+    if (!control) return;
     if (control.status !== "completed") {
       return res.status(400).json({ status: "error", message: "Solo se pueden reabrir controles completados" });
     }
@@ -239,11 +236,8 @@ const reopenMonthlyControl = async (req, res) => {
 const getOpenOrdersCount = async (req, res) => {
   try {
     const { control_id } = req.params;
-    const control = await MonthlyControl.findById(control_id);
-    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
-    if (!canAccessBranch(req.user, control.branch_id)) {
-      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
-    }
+    const control = await loadAccessibleControl(req, res, control_id);
+    if (!control) return;
     const count = await MonthlyControl.countOpenOrders(control_id);
     res.json({ status: "success", count });
   } catch (error) {
@@ -273,11 +267,8 @@ const getMonthlyControlHistory = async (req, res) => {
 const deleteMonthlyControl = async (req, res) => {
   try {
     const { control_id } = req.params;
-    const control = await MonthlyControl.findById(control_id);
-    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
-    if (!canAccessBranch(req.user, control.branch_id)) {
-      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
-    }
+    const control = await loadAccessibleControl(req, res, control_id);
+    if (!control) return;
     if (req.user.role !== "admin") {
       return res.status(403).json({ status: "error", message: "Solo los administradores pueden eliminar controles" });
     }
@@ -296,11 +287,8 @@ const deleteMonthlyControl = async (req, res) => {
 const getStockItems = async (req, res) => {
   try {
     const { control_id } = req.params;
-    const control = await MonthlyControl.findById(control_id);
-    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
-    if (!canAccessBranch(req.user, control.branch_id)) {
-      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
-    }
+    const control = await loadAccessibleControl(req, res, control_id);
+    if (!control) return;
 
     const items = await StockControl.findByControlId(control_id);
     // Fecha de última sincronización del control: el máximo last_sync_at de sus ítems.
@@ -334,11 +322,8 @@ const upsertStockItem = async (req, res) => {
       return res.status(400).json({ status: "error", message: "Indique product_stock_id, product_id o group_id" });
     }
 
-    const control = await MonthlyControl.findById(monthly_control_id);
-    if (!control) return res.status(404).json({ status: "error", message: "Control no encontrado" });
-    if (!canAccessBranch(req.user, control.branch_id)) {
-      return res.status(403).json({ status: "error", message: "No tienes acceso a este control" });
-    }
+    const control = await loadAccessibleControl(req, res, monthly_control_id);
+    if (!control) return;
     if (control.status !== "draft") {
       return res.status(400).json({ status: "error", message: "Solo se pueden modificar controles en borrador" });
     }
@@ -407,28 +392,8 @@ const getAvailableProducts = async (req, res) => {
       return res.status(400).json({ status: "error", message: "category_id es requerido" });
     }
 
-    const result = await pool.query(
-      `SELECT psb.id, psb.display_name, psb.stock, psb.last_sync_at
-         FROM product_stock_by_branch psb
-         LEFT JOIN products p       ON psb.product_id = p.id
-         LEFT JOIN product_groups pg ON psb.group_id = pg.id
-         LEFT JOIN categories cg    ON pg.category_type = cg.category_name
-        WHERE psb.branch_id = $1
-          AND psb.display_name IS NOT NULL
-          AND ( p.category_id = $2 OR cg.id = $2 )
-          -- Excluir marcas con prueba EN PRUEBA en esta sucursal/rubro: se
-          -- gestionan en "Marcas a prueba", no se suman al control todavia.
-          AND NOT EXISTS (
-            SELECT 1 FROM brand_trials bt
-            WHERE bt.status = 'en_prueba'
-              AND bt.branch_id = psb.branch_id
-              AND bt.brand_id = COALESCE(pg.brand_id, p.brand_id)
-              AND (bt.category_id IS NULL OR bt.category_id = $2)
-          )
-        ORDER BY psb.display_name`,
-      [branch_id, category_id]
-    );
-    res.json({ status: "success", products: result.rows });
+    const products = await StockControl.findAvailableProducts(branch_id, category_id);
+    res.json({ status: "success", products });
   } catch (error) {
     handleControllerError(res, error, "Error obteniendo productos disponibles:");
   }
@@ -448,40 +413,8 @@ const getGlobalCatalog = async (req, res) => {
       return res.status(400).json({ status: "error", message: "category_id es requerido" });
     }
 
-    // Productos individuales activos sin fila en esta sucursal (los no agrupados;
-    // los agrupados se ofrecen como grupo). category_name desde categories.
-    // Grupos sin fila en esta sucursal; category_name desde product_groups.category_type.
-    // Todo FILTRADO por el rubro del control:
-    //   - productos sueltos: products.category_id = $2
-    //   - grupos:            product_groups.category_type = categories.category_name (id = $2)
-    const result = await pool.query(
-      `SELECT p.id AS product_id, NULL::int AS group_id,
-              p.display_name, c.category_name
-         FROM products p
-         JOIN categories c ON p.category_id = c.id
-        WHERE p.is_active = true
-          AND p.is_grouped = false
-          AND p.display_name IS NOT NULL
-          AND c.id = $2
-          AND NOT EXISTS (
-            SELECT 1 FROM product_stock_by_branch psb
-             WHERE psb.product_id = p.id AND psb.branch_id = $1
-          )
-       UNION ALL
-       SELECT NULL::int AS product_id, pg.id AS group_id,
-              pg.display_name, pg.category_type AS category_name
-         FROM product_groups pg
-         JOIN categories cg ON pg.category_type = cg.category_name
-        WHERE pg.display_name IS NOT NULL
-          AND cg.id = $2
-          AND NOT EXISTS (
-            SELECT 1 FROM product_stock_by_branch psb
-             WHERE psb.group_id = pg.id AND psb.branch_id = $1
-          )
-       ORDER BY display_name`,
-      [branch_id, category_id]
-    );
-    res.json({ status: "success", products: result.rows });
+    const products = await StockControl.findGlobalCatalog(branch_id, category_id);
+    res.json({ status: "success", products });
   } catch (error) {
     handleControllerError(res, error, "Error obteniendo catálogo global:");
   }
