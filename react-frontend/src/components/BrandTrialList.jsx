@@ -32,10 +32,8 @@ import { getBranchesList } from "../data/branches";
 import PageContainer from "./PageContainer";
 import ActionButton from "./ActionButton";
 import { useAuth } from "../context/AuthContext";
+import { formatCurrency, formatDate } from "../utils/format";
 
-const formatDate = (d) => (d ? new Date(d).toLocaleDateString("es-ES") : "");
-const formatCurrency = (v) =>
-  new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(v || 0);
 // Fecha YYYY-MM-DD para inputs type=date (sin desfase de zona horaria).
 const toInputDate = (d) => (d ? String(d).slice(0, 10) : "");
 const todayInput = () => new Date().toISOString().slice(0, 10);
@@ -55,12 +53,12 @@ const emptyForm = {
 };
 
 export default function BrandTrialList() {
-  const { user } = useAuth();
+  const { hasRole } = useAuth();
   // Alta y decision final (incorporar/descartar) de marcas a prueba: definen
   // que entra al catalogo, asi que son de admin. El manager consulta el estado
   // de las pruebas. Editar y borrar tambien: son vias para lo mismo.
   // Esto solo oculta la UI — restringe requireRole en backend/routes/brandTrials.js.
-  const isAdmin = user?.role === "admin";
+  const isAdmin = hasRole("admin");
 
   const notifications = useNotifications();
   const dialogs = useDialogs();

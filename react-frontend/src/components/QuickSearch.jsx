@@ -24,6 +24,7 @@ import WarehouseIcon from "@mui/icons-material/Warehouse";
 import { useSearchParams } from "react-router";
 import { searchStock, getProductOptions, getSupplierOptions, groupByBranch } from "../data/search";
 import PageContainer from "./PageContainer";
+import { formatDate } from "../utils/format";
 
 // Mismo criterio de color que la pantalla de control (StockControlShow).
 const STOCK_STATUS_COLOR = { 1: "error", 2: "success", 3: "warning" };
@@ -95,12 +96,6 @@ const NAMES_SEPARATOR = "|";
 // Parametros que identifican QUE se busca. Solo un cambio en estos re-consulta
 // al backend; los de filtro se aplican sobre lo que ya esta en memoria.
 const SEARCH_PARAM_KEYS = ["supplier", "product", "q", "names"];
-
-const formatDate = (value) => {
-  if (!value) return "—";
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("es-AR");
-};
 
 export default function QuickSearch() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -705,9 +700,7 @@ export default function QuickSearch() {
                           <Tooltip
                             title={`Control ${
                               item.controlStatus === "draft" ? "abierto" : "cerrado"
-                            } del ${formatDate(item.controlDate)} · Stock al ${formatDate(
-                              item.lastSyncAt
-                            )}`}
+                            } del ${formatDate(item.controlDate, "—")} · Stock al ${formatDate(item.lastSyncAt, "—")}`}
                           >
                             <Chip
                               label={

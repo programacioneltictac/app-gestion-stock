@@ -25,16 +25,14 @@ import { getOrders, deleteOrder, getOrderStatusLabel, getOrderStatusColor, getOr
 import { getBranchesList } from '../data/branches';
 import PageContainer from './PageContainer';
 import ActionButton from './ActionButton';
-
-const formatCurrency = (value) =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(value);
+import { formatCurrency } from '../utils/format';
 
 
 export default function OrderList() {
   const navigate = useNavigate();
   const dialogs = useDialogs();
   const notifications = useNotifications();
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
 
   // TODO el estado de la vista (tab, vista activa/archivada y los tres filtros)
   // vive en la URL, no en useState. Así el "Volver" de OrderShow puede restituir
@@ -68,11 +66,11 @@ export default function OrderList() {
     [setSearchParams]
   );
 
-  const isEmployee = user?.role === 'employee';
+  const isEmployee = hasRole('employee');
   // Eliminar ordenes es solo de admin: es destructivo e irreversible. El
   // manager sigue gestionando el ciclo de vida (estado, recepcion). Esto solo
   // oculta la accion — quien restringe es requireRole en backend/routes/orders.js.
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = hasRole('admin');
   // Las ordenes externas (proveedor) las gestiona compras: solo admin/manager.
   // El empleado solo ve el tab interno (Hub).
   // La pestaña activa vive en la URL (?tab=internal|external) para que al volver

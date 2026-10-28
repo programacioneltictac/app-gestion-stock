@@ -42,7 +42,9 @@ function DashboardSidebar({
   container,
 }) {
   const theme = useTheme();
-  const { user } = useAuth();
+  const { hasRole, hasAnyRole } = useAuth();
+  const isStaff = hasAnyRole(['admin', 'manager']);
+  const isAdmin = hasRole('admin');
 
   const { pathname } = useLocation();
 
@@ -181,7 +183,7 @@ function DashboardSidebar({
               href="/orders"
               selected={!!matchPath('/orders/*', pathname)}
             />
-            {(user?.role === 'admin' || user?.role === 'manager') && (
+            {isStaff && (
               <DashboardSidebarPageItem
                 id="brand-trials"
                 title="Marcas a prueba"
@@ -240,7 +242,7 @@ function DashboardSidebar({
                 </List>
               }
             />
-            {user?.role === 'admin' && (
+            {isAdmin && (
               <>
                 <DashboardSidebarDividerItem />
                 <DashboardSidebarHeaderItem>
@@ -301,7 +303,7 @@ function DashboardSidebar({
         </Box>
       </React.Fragment>
     ),
-    [mini, hasDrawerTransitions, isFullyExpanded, expandedItemIds, pathname, user, branches]
+    [mini, hasDrawerTransitions, isFullyExpanded, expandedItemIds, pathname, isStaff, isAdmin, branches]
   );
 
   const getDrawerSharedSx = React.useCallback(

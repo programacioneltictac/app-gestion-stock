@@ -29,9 +29,7 @@ import { getCategories } from "../data/catalogs";
 import { getBranchesList } from "../data/branches";
 import PageContainer from "./PageContainer";
 import ActionButton from "./ActionButton";
-
-const formatCurrency = (value) =>
-  new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value || 0);
+import { formatCurrency } from "../utils/format";
 
 export default function StockControlList() {
   const { branchId } = useParams();

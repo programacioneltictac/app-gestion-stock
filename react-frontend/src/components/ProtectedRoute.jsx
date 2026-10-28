@@ -1,6 +1,6 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import { Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router';
 import { useAuth } from '../context/AuthContext';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';

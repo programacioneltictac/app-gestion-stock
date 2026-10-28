@@ -33,9 +33,7 @@ import { getBranchesList } from '../data/branches';
 import { getSituation } from '../data/reports';
 import PageContainer from './PageContainer';
 import { dashboardListScrollSx } from '../utils/scrollStyles';
-
-const formatCurrency = (value) =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(value || 0);
+import { formatCurrency } from '../utils/format';
 
 // Tarjeta-resumen con número clave. Clic opcional (onClick) para navegar.
 function SummaryCard({ icon, label, value, color, onClick }) {
@@ -79,10 +77,10 @@ function cycleColor(days, thresholds) {
 }
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, hasAnyRole } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const isStaff = user?.role === 'admin' || user?.role === 'manager';
+  const isStaff = hasAnyRole(['admin', 'manager']);
 
   // Filtro de sucursales (chips, solo admin/manager). Vive en la URL para que el
   // "Volver" desde un control lo reponga: sin `branches` = todas (arranque);
@@ -366,7 +364,7 @@ export default function Dashboard() {
           }
           color={cycleColor(data?.cycleTimeHubDays, CYCLE_THRESHOLDS.hub)}
         />
-        {(user?.role === 'admin' || user?.role === 'manager') && (
+        {isStaff && (
           <SummaryCard
             icon={<ScienceIcon fontSize="large" />}
             label="Marcas a evaluar"

@@ -31,8 +31,11 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
+    // errorMessage es opcion propia (mensaje por defecto ante error), no de fetch.
+    const fetchOptions = { ...options };
+    delete fetchOptions.errorMessage;
     const config = {
-      ...options,
+      ...fetchOptions,
       headers,
     };
 
@@ -46,10 +49,26 @@ class ApiClient {
         throw new Error('Session expired. Please login again.');
       }
 
-      const data = await response.json();
+      // 204 o cuerpo no-JSON (ej. HTML de un proxy ante un 413/502): sin esto
+      // response.json() tiraba un SyntaxError que tapaba el error real.
+      const text = await response.text();
+      let data = null;
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = null;
+        }
+      }
 
       if (!response.ok) {
-        throw new Error(data.message || data.error || 'Request failed');
+        const error = new Error(
+          data?.message || data?.error || options.errorMessage || 'Request failed'
+        );
+        // code/details del backend (ej. 409 de sync en curso, errores del import).
+        if (data?.code) error.code = data.code;
+        if (data?.details) error.details = data.details;
+        throw error;
       }
 
       return data;
@@ -89,6 +108,16 @@ class ApiClient {
       ...options,
       method: 'PATCH',
       body: JSON.stringify(data),
+    });
+  }
+
+  // POST con cuerpo crudo (sin JSON.stringify), ej. un CSV como ArrayBuffer.
+  async postRaw(endpoint, body, contentType, options = {}) {
+    return this.request(endpoint, {
+      ...options,
+      method: 'POST',
+      headers: { 'Content-Type': contentType, ...options.headers },
+      body,
     });
   }
 

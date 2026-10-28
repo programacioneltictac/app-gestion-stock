@@ -43,6 +43,7 @@ import {
 import { createOrderFromControl } from "../data/orders";
 import PageContainer from "./PageContainer";
 import { CONDITION, STOCK_STATUS } from "../constants";
+import { formatCurrency, formatDateTime } from "../utils/format";
 import ActionButton from "./ActionButton";
 
 const STOCK_STATUS_COLOR = { 1: "error", 2: "success", 3: "warning", 4: "warning" };
@@ -67,22 +68,6 @@ const ORDER_DEST_LABELS = {
   default:       { label: "Pedido",                 color: "info",      tooltip: "Ya enviado a una orden de reposición" },
 };
 
-const formatCurrency = (value) =>
-  new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value || 0);
-
-// Formatea un ISO timestamp a "dd/mm/aaaa hh:mm" en hora local.
-function formatSyncDate(iso) {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleString("es-AR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 // Chips de estado del panel superior. El id es stock_status_id (1 generar
 // pedido, 2 optimo, 3 sobrestock) y statKey el campo del resumen que muestran.
@@ -98,12 +83,12 @@ export default function StockControlShow() {
   const location = useLocation();
   const dialogs = useDialogs();
   const notifications = useNotifications();
-  const { user } = useAuth();
+  const { hasRole } = useAuth();
   // Crear/cerrar/discontinuar controles, editar sus items y generar ordenes son
   // acciones de admin. El manager consulta el control y gestiona las ordenes ya
   // creadas. Esto solo oculta la UI: quien restringe es requireRole en
   // backend/routes/stock.js y orders.js.
-  const isAdmin = user?.role === "admin";
+  const isAdmin = hasRole("admin");
 
   const [control, setControl] = React.useState(null);
   const [items, setItems] = React.useState([]);
@@ -959,9 +944,9 @@ export default function StockControlShow() {
                 />
               );
             })}
-          {formatSyncDate(lastSyncAt) && (
+          {formatDateTime(lastSyncAt) && (
             <Typography variant="body2" color="text.secondary" sx={{ ml: "auto" }}>
-              Última sync: <strong>{formatSyncDate(lastSyncAt)}</strong>
+              Última sync: <strong>{formatDateTime(lastSyncAt)}</strong>
             </Typography>
           )}
         </Stack>

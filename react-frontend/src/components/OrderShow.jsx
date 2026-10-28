@@ -43,9 +43,7 @@ import {
 } from '../data/orders';
 import PageContainer from './PageContainer';
 import ActionButton from './ActionButton';
-
-const formatCurrency = (value) =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(value);
+import { formatCurrency } from '../utils/format';
 
 
 export default function OrderShow() {
@@ -54,7 +52,7 @@ export default function OrderShow() {
   const location = useLocation();
   const dialogs = useDialogs();
   const notifications = useNotifications();
-  const { user } = useAuth();
+  const { hasRole } = useAuth();
 
   // Estado de la lista de origen (tab, vista y filtros) serializado como query
   // string. Lo pasa OrderList vía state al abrir la orden, para que "Volver"
@@ -80,13 +78,13 @@ export default function OrderShow() {
   const [editingQty, setEditingQty] = React.useState('');
   const [isSavingItem, setIsSavingItem] = React.useState(false);
 
-  const isEmployee = user?.role === 'employee';
+  const isEmployee = hasRole('employee');
   const canEditStatus = !isEmployee;
   // Borrar (la orden entera o un item suelto) es solo de admin: es destructivo
   // e irreversible, y vaciar una orden item por item logra lo mismo que
   // borrarla. El manager conserva estado y recepcion. Esto solo oculta la UI —
   // quien restringe es requireRole en backend/routes/orders.js.
-  const canDelete = user?.role === 'admin';
+  const canDelete = hasRole('admin');
 
   // Las órdenes internas (Nodo Hub) usan "finalizar ítem" (marca de gestión) en
   // lugar de la recepción de mercadería. Cualquiera con acceso puede finalizar.
